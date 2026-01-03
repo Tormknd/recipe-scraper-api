@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  scraper:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: flavorsync-scraper
+    restart: always
+    environment:
+      - PORT=5000
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    expose:
+      - "5000"
+    networks:
+      - flavorsync-network
+
+  webapp:
+    build: ../rania
+    container_name: flavorsync-webapp
+    restart: always
+    environment:
+      - DATABASE_URL=file:./dev.db
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SCRAPER_API_URL=http://scraper:5000/process
+      - HOSTNAME=0.0.0.0
+    volumes:
+      # Persist SQLite DB
+      - ./prisma/dev.db:/app/prisma/dev.db
+    expose:
+      - "3000"
+    networks:
+      - flavorsync-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: flavorsync-nginx
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - scraper
+      - webapp
+    networks:
+      - flavorsync-network
+
+networks:
+  flavorsync-network:
+    driver: bridge
