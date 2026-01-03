@@ -3,33 +3,18 @@ version: '3.8'
 services:
   scraper:
     build: 
-      context: . # Build context is current directory (scraper repo)
+      context: . 
       dockerfile: Dockerfile
     container_name: recipeme-scraper
     restart: always
     environment:
       - PORT=5000
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-    expose:
-      - "5000"
-    networks:
-      - flavorsync-network
-
-  webapp:
-    # On server, this should point to /var/www/rania
-    # For local dev, relative path is fine, but server config takes precedence
-    build: ../rania 
-    container_name: recipeme-webapp
-    restart: always
-    environment:
-      - DATABASE_URL=file:./dev.db
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - SCRAPER_API_URL=http://recipeme-scraper:5000/process
-      - HOSTNAME=0.0.0.0
-    volumes:
-      - ./prisma/dev.db:/app/prisma/dev.db
+    # On expose le port 5000 UNIQUEMENT en local (127.0.0.1)
+    # Ainsi, ton Rania existant (sur le serveur) peut appeler http://localhost:5000
+    # Mais personne ne peut y accéder depuis Internet.
     ports:
-      - "3001:3000" # Expose Webapp on port 3001 to be proxied by system Nginx
+      - "127.0.0.1:5000:5000"
     networks:
       - flavorsync-network
 
