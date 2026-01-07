@@ -59,3 +59,12 @@ playwright/.cache/
 temp/
 tmp/
 
+# Test files
+test-api.js
+src/test-models*.ts
+dist/test-models*.js
+
+
+
+
+
