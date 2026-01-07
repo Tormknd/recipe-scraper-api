@@ -23,8 +23,17 @@ export interface ProcessingRequest {
   url: string;
 }
 
+export interface UsageMetrics {
+  promptTokens?: number;
+  candidatesTokens?: number;
+  totalTokens?: number;
+  costEUR?: number; // Coût estimé en euros
+}
+
 export interface ProcessingResponse {
   success: boolean;
+  method?: 'web_scraping' | 'video_ai';
   data?: Recipe;
   error?: string;
+  usage?: UsageMetrics; // Métriques d'utilisation (tokens, coûts)
 }
