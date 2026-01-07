@@ -3,6 +3,8 @@ node_modules
 .pnp
 .pnp.js
 
+.cursor
+
 # Testing
 coverage
 .nyc_output
@@ -63,6 +65,9 @@ tmp/
 test-api.js
 src/test-models*.ts
 dist/test-models*.js
+
+# Cookies (sensible - à mettre manuellement sur le serveur)
+# cookies.txt
 
 
 

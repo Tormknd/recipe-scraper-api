@@ -15,6 +15,9 @@ services:
     # Mais personne ne peut y accéder depuis Internet.
     ports:
       - "127.0.0.1:5000:5000"
+    volumes:
+      # Monte le fichier cookies depuis l'hôte (plus flexible que de le copier dans l'image)
+      - ./cookies.txt:/app/cookies.txt:ro
     networks:
       - flavorsync-network
     # Limites de ressources pour protéger le serveur 4GB

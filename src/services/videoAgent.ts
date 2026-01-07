@@ -20,26 +20,42 @@ if (!API_KEY) {
 const genAI = new GoogleGenerativeAI(API_KEY);
 const MODEL_NAME = 'gemini-flash-latest';
 
+// Chemin vers le fichier cookies (dans le conteneur Docker)
+// En production Docker: /app/cookies.txt
+// En dev local: ./cookies.txt à la racine
+const COOKIES_PATH = process.env.COOKIES_PATH || path.resolve(process.cwd(), 'cookies.txt');
+const USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+
 async function downloadVideo(url: string, outputFilename: string): Promise<string> {
   const tmpDir = os.tmpdir();
   const outputPath = path.resolve(tmpDir, outputFilename);
   
+  // Vérifier si le fichier cookies existe
+  const hasCookies = fs.existsSync(COOKIES_PATH);
+  const cookiesArg = hasCookies ? `--cookies "${COOKIES_PATH}"` : '';
+  
+  if (hasCookies) {
+    console.log(`🍪 Using cookies from: ${COOKIES_PATH}`);
+  } else {
+    console.warn(`⚠️ No cookies file found at ${COOKIES_PATH} - Instagram may block requests from datacenter IP`);
+  }
+  
   const strategies = [
     {
       name: '720p optimized',
-      command: `yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]" --force-overwrites --no-warnings -o "${outputPath}" "${url}"`
+      command: `yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]" --user-agent "${USER_AGENT}" ${cookiesArg} --force-overwrites --no-warnings -o "${outputPath}" "${url}"`
     },
     {
       name: '720p MP4 fallback',
-      command: `yt-dlp -f "best[height<=720][ext=mp4]/best[height<=720]" --force-overwrites --no-warnings -o "${outputPath}" "${url}"`
+      command: `yt-dlp -f "best[height<=720][ext=mp4]/best[height<=720]" --user-agent "${USER_AGENT}" ${cookiesArg} --force-overwrites --no-warnings -o "${outputPath}" "${url}"`
     },
     {
       name: 'best quality (720p limit)',
-      command: `yt-dlp -f "best[height<=720]/best" --force-overwrites --no-warnings -o "${outputPath}" "${url}"`
+      command: `yt-dlp -f "best[height<=720]/best" --user-agent "${USER_AGENT}" ${cookiesArg} --force-overwrites --no-warnings -o "${outputPath}" "${url}"`
     },
     {
       name: 'any format',
-      command: `yt-dlp -f "best" --force-overwrites --no-warnings -o "${outputPath}" "${url}"`
+      command: `yt-dlp -f "best" --user-agent "${USER_AGENT}" ${cookiesArg} --force-overwrites --no-warnings -o "${outputPath}" "${url}"`
     }
   ];
   
@@ -66,7 +82,16 @@ async function downloadVideo(url: string, outputFilename: string): Promise<strin
         }
       }
     } catch (error: any) {
-      console.warn(`⚠️ Strategy "${strategy.name}" failed: ${error.message.substring(0, 100)}`);
+      const errorMsg = error.message || String(error);
+      const fullError = error.stderr || error.stdout || errorMsg;
+      console.warn(`⚠️ Strategy "${strategy.name}" failed: ${errorMsg.substring(0, 150)}`);
+      
+      // Log plus détaillé pour debug
+      if (fullError.includes('429') || fullError.includes('Too Many Requests')) {
+        console.error('❌ Rate limit détecté (429) - IP bloquée par Instagram');
+      } else if (fullError.includes('401') || fullError.includes('Unauthorized') || fullError.includes('Login')) {
+        console.error('❌ Authentification requise - Vérifiez les cookies');
+      }
       
       if (fs.existsSync(outputPath)) {
         try {
@@ -79,7 +104,8 @@ async function downloadVideo(url: string, outputFilename: string): Promise<strin
     }
   }
   
-  throw new Error('Impossible de télécharger la vidéo (toutes les stratégies ont échoué). Instagram peut nécessiter une authentification.');
+  const cookiesInfo = fs.existsSync(COOKIES_PATH) ? ' (cookies utilisés)' : ' (pas de cookies)';
+  throw new Error(`Impossible de télécharger la vidéo (toutes les stratégies ont échoué)${cookiesInfo}. Vérifiez les logs ci-dessus pour plus de détails.`);
 }
 
 export async function processVideoRecipe(url: string): Promise<{ recipe: Recipe; usage?: UsageMetrics } | null> {

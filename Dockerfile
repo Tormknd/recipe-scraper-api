@@ -14,8 +14,8 @@ ENV VIRTUAL_ENV=/opt/venv
 RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-# 3. Installation de yt-dlp (Le téléchargeur vidéo ultime)
-RUN pip3 install yt-dlp
+# 3. Installation de yt-dlp (Le téléchargeur vidéo ultime) - Toujours la dernière version
+RUN pip3 install --upgrade yt-dlp
 
 # 4. Installation des dépendances Node
 WORKDIR /app
@@ -25,8 +25,9 @@ RUN npm ci
 # 5. Installation des navigateurs Playwright
 RUN npx playwright install chromium --with-deps
 
-# 6. Copie du code source
+# 6. Copie du code source et du fichier cookies (si présent)
 COPY . .
+# Le fichier cookies.txt sera copié si présent (optionnel, peut être monté via volume)
 
 # 7. Build TypeScript
 RUN npm run build
