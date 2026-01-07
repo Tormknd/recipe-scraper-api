@@ -28,4 +28,4 @@ services:
 
 networks:
   flavorsync-network:
-    driver: bridge
+    external: true
