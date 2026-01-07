@@ -103,9 +103,25 @@ export class AIService {
         costEUR: 0 // Sera calculé dans index.ts
       } : undefined;
       
-      // console.log(`[AI] Raw response: ${text.substring(0, 100)}...`);
+      console.log(`[AI] Raw response preview: ${text.substring(0, 200)}...`);
 
-      const parsedData: any = JSON.parse(text);
+      let parsedData: any;
+      try {
+        parsedData = JSON.parse(text);
+      } catch (parseError) {
+        console.error('[AI] Failed to parse JSON response:', text.substring(0, 500));
+        throw new Error('Invalid JSON response from AI');
+      }
+      
+      console.log('[AI] Parsed data:', {
+        title: parsedData.title,
+        ingredientsCount: parsedData.ingredients?.length || 0,
+        stepsCount: parsedData.steps?.length || 0,
+        isIncomplete: parsedData.isIncomplete,
+        hasTitle: !!parsedData.title,
+        hasIngredients: !!(parsedData.ingredients && parsedData.ingredients.length > 0),
+        hasSteps: !!(parsedData.steps && parsedData.steps.length > 0)
+      });
       
       const recipe: Recipe = {
         title: parsedData.title || '',
@@ -119,7 +135,10 @@ export class AIService {
         id: crypto.randomUUID(),
       };
       
-      return { recipe, isIncomplete: parsedData.isIncomplete === true, usage };
+      const isIncomplete = parsedData.isIncomplete === true;
+      console.log(`[AI] Extraction result: isIncomplete=${isIncomplete}, steps=${recipe.steps.length}, ingredients=${recipe.ingredients.length}`);
+      
+      return { recipe, isIncomplete, usage };
 
     } catch (error) {
       console.error('[AI] Error processing with Gemini:', error);

@@ -149,7 +149,16 @@ export class ScraperService {
       const screenshotBase64 = buffer.toString('base64');
       const title = await page.title();
 
-      console.log(`[Scraper] Successfully scraped ${url}. Text length: ${text.length}`);
+      console.log(`[Scraper] Successfully scraped ${url}`);
+      console.log(`[Scraper] Extracted data:`, {
+        textLength: text.length,
+        captionLength: specificCaption.length,
+        metaDescriptionLength: metaDescription.length,
+        jsonLdLength: jsonLd.length,
+        visibleTextLength: visibleText.length,
+        commentsCount: comments.length,
+        title: title
+      });
       
       return {
         text,
