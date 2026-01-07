@@ -1,29 +1,35 @@
-# Utilisation de l'image officielle Playwright (basée sur Ubuntu)
-FROM mcr.microsoft.com/playwright:v1.44.0-jammy
+# Utilisation de Node.js 20 Bookworm comme base
+FROM node:20-bookworm
 
-# Bonne pratique : ne pas utiliser root. L'image Playwright fournit "pwuser".
-# Mais on a besoin de root d'abord pour l'installation des deps Node.
+# 1. Installation des dépendances système pour Playwright, Python et FFMPEG
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
+# 2. Création d'un environnement virtuel pour Python (Recommandé par Debian/Bookworm)
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# 3. Installation de yt-dlp (Le téléchargeur vidéo ultime)
+RUN pip3 install yt-dlp
+
+# 4. Installation des dépendances Node
 WORKDIR /app
-
-# 1. Copie des fichiers de dépendances
 COPY package*.json ./
-
-# 2. Installation des dépendances (en root pour avoir les droits d'écriture globaux si besoin)
-# npm ci assure une installation propre basée sur le lockfile
 RUN npm ci
 
-# 3. Copie du code source
+# 5. Installation des navigateurs Playwright
+RUN npx playwright install chromium --with-deps
+
+# 6. Copie du code source
 COPY . .
 
-# 4. Build TypeScript
+# 7. Build TypeScript
 RUN npm run build
-
-# 5. Permission Fix : On donne la propriété du dossier /app à pwuser
-RUN chown -R pwuser:pwuser /app
-
-# 6. Switch vers l'utilisateur non-privilégié pour l'exécution
-USER pwuser
 
 # Variables d'environnement par défaut
 ENV PORT=5000

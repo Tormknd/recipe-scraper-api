@@ -11,8 +11,6 @@ if (!API_KEY) {
 }
 
 const genAI = new GoogleGenerativeAI(API_KEY || '');
-
-// Fallback to the stable flash model
 const MODEL_NAME = 'gemini-flash-latest';
 
 export class AIService {
@@ -27,7 +25,7 @@ export class AIService {
     });
   }
 
-  async extractRecipe(data: ScrapedData): Promise<Recipe> {
+  async extractRecipe(data: ScrapedData): Promise<{ recipe: Recipe; isIncomplete: boolean; usage?: any }> {
     console.log(`[AI] Processing recipe for: ${data.url}`);
 
     const commentsContext = data.comments && data.comments.length > 0 
@@ -55,10 +53,22 @@ export class AIService {
         "servings": "number of servings (approx)",
         "prep_time": "preparation time (approx)",
         "cook_time": "cooking time (approx)",
-        "tips": ["Tip from comments: bake at 180C instead", "Chef tip: use fresh basil"]
+        "tips": ["Tip from comments: bake at 180C instead", "Chef tip: use fresh basil"],
+        "isIncomplete": false
       }
 
-      If you strictly cannot find a recipe, return a JSON with empty fields but do not throw an error.
+      **CRITICAL - DÉTECTION D'INCOMPLÉTUDE** :
+      Tu DOIS mettre "isIncomplete": true si :
+      - Il n'y a AUCUNE étape de préparation (steps vide ou absent)
+      - Les ingrédients sont absents ou très incomplets
+      - La description est très courte (< 50 mots) et ne contient pas les détails de préparation
+      - Les temps de cuisson/préparation sont absents ET les étapes sont absentes
+      
+      Une recette SANS ÉTAPES est TOUJOURS incomplète, même si les ingrédients sont présents.
+      
+      Si "isIncomplete": true, l'API basculera automatiquement sur l'analyse vidéo pour compléter les informations manquantes.
+
+      If you strictly cannot find a recipe, return a JSON with empty fields and "isIncomplete": true.
       
       Page Title: ${data.title}
       Source URL: ${data.url}
@@ -84,15 +94,32 @@ export class AIService {
       const response = await result.response;
       const text = response.text();
       
+      // Extraire les métriques d'utilisation
+      const usageMetadata = response.usageMetadata;
+      const usage = usageMetadata ? {
+        promptTokens: usageMetadata.promptTokenCount || 0,
+        candidatesTokens: usageMetadata.candidatesTokenCount || 0,
+        totalTokens: usageMetadata.totalTokenCount || 0,
+        costEUR: 0 // Sera calculé dans index.ts
+      } : undefined;
+      
       // console.log(`[AI] Raw response: ${text.substring(0, 100)}...`);
 
-      const recipe: Recipe = JSON.parse(text);
+      const parsedData: any = JSON.parse(text);
       
-      // Enrich with metadata
-      recipe.source_url = data.url;
-      recipe.id = crypto.randomUUID(); 
-
-      return recipe;
+      const recipe: Recipe = {
+        title: parsedData.title || '',
+        ingredients: parsedData.ingredients || [],
+        steps: parsedData.steps || [],
+        servings: parsedData.servings,
+        prep_time: parsedData.prep_time,
+        cook_time: parsedData.cook_time,
+        tips: parsedData.tips || [],
+        source_url: data.url,
+        id: crypto.randomUUID(),
+      };
+      
+      return { recipe, isIncomplete: parsedData.isIncomplete === true, usage };
 
     } catch (error) {
       console.error('[AI] Error processing with Gemini:', error);

@@ -4,7 +4,7 @@
   "description": "API de scraping intelligente pour RecipeMe - Extrait des recettes depuis Instagram/TikTok",
   "main": "dist/index.js",
   "scripts": {
-    "start": "node dist/index.js",
+    "start": "node --expose-gc dist/index.js",
     "dev": "ts-node src/index.ts",
     "build": "tsc",
     "lint": "eslint src/**/*.ts",

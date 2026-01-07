@@ -6,7 +6,7 @@ services:
       context: . 
       dockerfile: Dockerfile
     container_name: recipeme-scraper
-    restart: always
+    restart: unless-stopped
     environment:
       - PORT=5000
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -17,6 +17,14 @@ services:
       - "127.0.0.1:5000:5000"
     networks:
       - flavorsync-network
+    # Limites de ressources pour protéger le serveur 4GB
+    deploy:
+      resources:
+        limits:
+          cpus: '1.50'  # On laisse du CPU pour le système et autres apps
+          memory: 3G    # On laisse 1GB libre pour l'OS (sur 4GB totaux)
+        reservations:
+          memory: 512M  # Minimum garanti
 
 networks:
   flavorsync-network:

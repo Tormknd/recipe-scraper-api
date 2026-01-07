@@ -1,135 +1,380 @@
-# 🥘 RecipeMe Scraper API
+# RecipeMe Scraper API
 
-> **Le Cerveau de l'Opération.**  
-> Ce microservice est le moteur d'ingestion intelligent de RecipeMe. Il transforme n'importe quel lien Instagram, TikTok ou Web en une recette structurée, propre et prête à cuisiner.
+API intelligente de scraping et d'extraction de recettes depuis les réseaux sociaux (Instagram, TikTok) utilisant l'IA multimodale Google Gemini 1.5 Flash.
 
----
+## 🎯 Fonctionnalités
 
-## 🧐 Pourquoi ce service ?
+### Scraping Hybride Intelligent
+- **Scraping Web** : Extraction automatique depuis le DOM, meta tags et screenshots
+- **Analyse Vidéo IA** : Fallback automatique vers l'analyse vidéo/audio si les données web sont incomplètes
+- **Détection d'incomplétude** : Gemini détecte automatiquement si les informations extraites sont insuffisantes et bascule sur l'analyse vidéo
 
-Récupérer une recette sur internet en 2026 est un enfer : pop-ups, murs de connexion, vidéos de 30 secondes pour une liste d'ingrédients...  
-Ce service résout ça avec une approche **"Force Brute Intelligente"** :
+### Analyse Multimodale
+- **Vision** : Analyse des screenshots et images
+- **Audio + Vidéo** : Analyse complète des vidéos (visuel + audio) pour extraire les recettes
+- **Optimisation RAM** : Limitation à 720p pour économiser la mémoire
 
-1.  **Il voit ce que vous voyez** : Utilise un navigateur réel (Playwright) pour charger la page.
-2.  **Il est malin** : Si Instagram bloque le texte derrière un login, il va chercher les données cachées (`JSON-LD`, `Meta Tags`) et analyse visuellement la page via Screenshot.
-3.  **Il est persévérant** : Scrolle automatiquement pour charger les commentaires et dénicher les astuces des utilisateurs ("Cuire à 180°C, pas 160 !").
-4.  **Il est polyglotte** : Traduit et normalise tout en Français via Gemini 1.5 Flash.
+### Métriques et Monitoring
+- **Tokens Gemini** : Suivi des tokens d'entrée, de sortie et totaux
+- **Coûts estimés** : Calcul automatique des coûts en EUR par requête
+- **Ressources système** : Monitoring CPU, RAM, réseau et disque
+- **Méthode utilisée** : Indication claire de la méthode (web_scraping ou video_ai)
 
----
+## 🏗️ Architecture
 
-## 🚀 Architecture Technique
-
-Ce projet est conçu comme un **Microservice Dockerisé**.
-
--   **Runtime** : Node.js + Express
--   **Engine** : Playwright (Chromium Headless) avec `puppeteer-extra-plugin-stealth` pour éviter la détection de bot.
--   **AI Core** : Google Gemini 1.5 Flash (Vision + Texte) pour l'extraction structurée.
--   **Infrastructure** : Docker Compose (prêt pour Hetzner/VPS).
-
----
-
-## 🛠️ Installation & Démarrage
-
-### Pré-requis
--   Docker & Docker Compose
--   Une clé API Google Gemini (Gratuite)
-
-### 1. Configuration
-Créez un fichier `.env` à la racine :
-
-```bash
-PORT=5000
-GEMINI_API_KEY=votre_clé_api_ici
-# Optionnel : URL de callback ou autre
+```
+┌─────────────────┐
+│   Client API    │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Express API    │ ◄── Rate Limiting, CORS, Helmet
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│   P-Queue       │ ◄── Concurrency: 1 (optimisé 4GB RAM)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Scraper Service │ ──► Playwright (Chromium)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│   AI Service    │ ──► Gemini Flash (Web Scraping)
+└────────┬────────┘
+         │
+         ├─── Données incomplètes ? ──►
+         │
+         ▼
+┌─────────────────┐
+│ Video Agent     │ ──► yt-dlp + Gemini 1.5 Flash (Vidéo)
+└─────────────────┘
 ```
 
-### 2. Lancement (Mode Production / Docker)
-C'est la méthode recommandée. L'image Docker inclut toutes les dépendances lourdes (Navigateurs, FFMPEG...).
+## 📋 Prérequis
 
+- **Node.js** 20+ (ou Docker)
+- **Docker** et **Docker Compose** (recommandé)
+- **Clé API Google Gemini** (`GEMINI_API_KEY`)
+- **Serveur** : Minimum 4GB RAM (optimisé pour Hetzner VPS)
+
+## 🚀 Installation
+
+### Option 1 : Docker (Recommandé)
+
+1. **Cloner le repository**
+```bash
+git clone <repository-url>
+cd scraper-api
+```
+
+2. **Configurer les variables d'environnement**
+```bash
+cp .env.example .env
+# Éditer .env et ajouter votre GEMINI_API_KEY
+```
+
+3. **Construire et démarrer**
 ```bash
 docker-compose up --build -d
 ```
-Le service écoutera sur `http://localhost:5000`.
 
-### 3. Lancement (Mode Développement)
-Si vous voulez bricoler le code :
+4. **Vérifier le statut**
+```bash
+curl http://localhost:5000/health
+```
 
+### Option 2 : Installation Locale
+
+1. **Installer les dépendances**
 ```bash
 npm install
+```
+
+2. **Configurer l'environnement**
+```bash
+cp .env.example .env
+# Éditer .env
+```
+
+3. **Build TypeScript**
+```bash
+npm run build
+```
+
+4. **Démarrer l'API**
+```bash
+npm start
+# ou en mode développement
 npm run dev
 ```
 
----
+## 🔧 Configuration
 
-## 🔌 Documentation API
+### Variables d'environnement
 
-Il n'y a qu'une seule route maîtresse. Simple et efficace.
+Créer un fichier `.env` à la racine :
 
-### `POST /process`
+```env
+# API Configuration
+PORT=5000
 
-Envoie une URL à analyser. Le processus peut prendre 10 à 30 secondes (le temps de scroller, capturer, et réfléchir).
+# Google Gemini API
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# CORS (optionnel)
+ALLOWED_ORIGIN=*
+
+# Environment
+NODE_ENV=production
+```
+
+### Docker Compose - Limites de ressources
+
+Le fichier `docker-compose.yml` est configuré pour un serveur 4GB RAM :
+
+```yaml
+deploy:
+  resources:
+    limits:
+      cpus: '1.50'
+      memory: 3G
+    reservations:
+      memory: 512M
+```
+
+## 📡 Utilisation de l'API
+
+### Endpoint : `/process`
+
+Extrait une recette depuis une URL Instagram ou TikTok.
 
 **Requête :**
-```json
+```bash
+POST http://localhost:5000/process
+Content-Type: application/json
+
 {
-  "url": "https://www.instagram.com/reel/DQcSVKQDBl7/..."
+  "url": "https://www.instagram.com/reel/ABC123/",
+  "forceVideo": false  // Optionnel : force l'analyse vidéo
 }
 ```
 
-**Réponse (Succès 200) :**
+**Réponse (Succès) :**
 ```json
 {
   "success": true,
+  "method": "video_ai",
   "data": {
-    "title": "ONE POT PASTA BUTTERNUT",
+    "id": "uuid",
+    "title": "Pasta Carbonara",
     "ingredients": [
-      "1/2 courge butternut",
-      "220g de pâtes",
-      "..."
+      "200g de pâtes",
+      "100g de lardons",
+      "2 œufs",
+      "50g de parmesan"
     ],
     "steps": [
-      "Éplucher la courge...",
-      "Cuire 40min à 180°C..."
+      "Cuire les pâtes",
+      "Faire revenir les lardons",
+      "Mélanger avec les œufs et le parmesan"
     ],
-    "tips": [
-      "Utilisez des pâtes courtes pour une meilleure cuisson."
-    ],
+    "prep_time": "10 min",
+    "cook_time": "15 min",
     "servings": "2 personnes",
-    "prep_time": "15 min",
-    "cook_time": "40 min",
-    "source_url": "...",
-    "id": "uuid..."
+    "tips": ["Utiliser du parmesan frais"],
+    "source_url": "https://www.instagram.com/reel/ABC123/",
+    "image_url": "https://..."
+  },
+  "usage": {
+    "promptTokens": 150000,
+    "candidatesTokens": 5000,
+    "totalTokens": 155000,
+    "costEUR": 0.013845
   }
 }
 ```
 
+**Réponse (Erreur) :**
+```json
+{
+  "success": false,
+  "error": "Failed to process recipe",
+  "message": "Invalid URL provided"
+}
+```
+
+### Endpoint : `/health`
+
+Vérifie le statut de l'API.
+
+**Requête :**
+```bash
+GET http://localhost:5000/health
+```
+
+**Réponse :**
+```json
+{
+  "status": "ok",
+  "queueSize": 0,
+  "pending": 0,
+  "memory": "77.18 MB"
+}
+```
+
+## 🧪 Tests
+
+Un script de test complet est fourni pour valider le fonctionnement :
+
+```bash
+node test-api.js
+```
+
+Le script :
+- ✅ Vérifie la santé de l'API
+- ✅ Teste chaque URL du tableau `testUrls`
+- ✅ Affiche les métriques détaillées (tokens, coûts, ressources)
+- ✅ Génère un résumé global avec coûts totaux
+
+**Configuration des tests :**
+Éditer `test-api.js` et modifier le tableau `testUrls` :
+
+```javascript
+const testUrls = [
+  'https://www.instagram.com/reel/ABC123/',
+  'https://vm.tiktok.com/XYZ789/',
+];
+```
+
+## 💰 Coûts Gemini
+
+### Tarification (Gemini Flash)
+- **Input** : $0.075 / 1M tokens (~0.069 EUR)
+- **Output** : $0.30 / 1M tokens (~0.276 EUR)
+
+### Estimation des coûts
+- **Scraping Web** : ~1,000-5,000 tokens → ~0.0001-0.0005 EUR
+- **Analyse Vidéo** : ~100,000-200,000 tokens → ~0.01-0.02 EUR
+
+Les métriques de coûts sont automatiquement calculées et retournées dans chaque réponse.
+
+### Limites Free Tier
+- **20 requêtes/jour** par modèle
+- **5 requêtes/minute** (depuis décembre 2025)
+- Réinitialisation quotidienne à minuit UTC
+
+Pour une utilisation en production, considérer un plan payant : https://ai.google.dev/pricing
+
+## 🔒 Sécurité
+
+- **Rate Limiting** : 100 requêtes / 15 minutes par IP
+- **Helmet.js** : Protection des headers HTTP
+- **CORS** : Configuration restrictive
+- **Validation** : Validation des URLs avec Zod
+- **SSRF Protection** : Vérification des URLs pour éviter les attaques SSRF
+- **Docker** : Isolation des processus
+
+## 📊 Optimisations
+
+### Gestion de la RAM (4GB serveur)
+- ✅ Limitation de la qualité vidéo à 720p max
+- ✅ Garbage Collection manuel (`--expose-gc`)
+- ✅ Queue avec concurrency = 1
+- ✅ Nettoyage automatique des fichiers temporaires
+- ✅ Limites Docker (3GB RAM max)
+
+### Performance
+- ✅ Cache des dépendances Docker
+- ✅ Timeout configurable (5 minutes par défaut)
+- ✅ Gestion d'erreurs robuste
+- ✅ Logging structuré avec Pino
+
+## 📁 Structure du Projet
+
+```
+scraper-api/
+├── src/
+│   ├── index.ts              # Point d'entrée Express
+│   ├── services/
+│   │   ├── scraper.ts        # Service de scraping web
+│   │   ├── ai.ts             # Service AI (Gemini) pour scraping
+│   │   └── videoAgent.ts     # Service d'analyse vidéo
+│   ├── types/
+│   │   └── index.ts          # Types TypeScript
+│   └── utils/
+│       └── security.ts       # Validation et sécurité
+├── test-api.js               # Script de test
+├── Dockerfile                # Image Docker
+├── docker-compose.yml        # Configuration Docker Compose
+├── package.json
+└── README.md
+```
+
+## 🔍 Logs
+
+Les logs sont structurés avec Pino et incluent :
+- Niveau de log (info, warn, error)
+- Timestamp
+- Métadonnées contextuelles (URL, méthode, tokens, coûts)
+
+En développement, les logs sont formatés avec `pino-pretty`.
+
+## 🐛 Dépannage
+
+### Le conteneur redémarre en boucle
+- Vérifier que `GEMINI_API_KEY` est défini dans `.env`
+- Vérifier les logs : `docker-compose logs -f`
+
+### Erreur "Garbage Collector not available"
+- Normal en développement local
+- En production, le script `start` inclut `--expose-gc`
+
+### Timeout sur les vidéos longues
+- Augmenter `API_TIMEOUT` dans `src/index.ts` (par défaut 5 minutes)
+
+### Consommation RAM élevée
+- Vérifier les limites Docker dans `docker-compose.yml`
+- Réduire la qualité vidéo dans `videoAgent.ts` (actuellement 720p)
+
+### Erreur 429 (Quota API dépassé)
+- Le free tier Gemini limite à 20 requêtes/jour
+- Attendre la réinitialisation quotidienne (minuit UTC)
+- Vérifier l'usage : https://ai.dev/usage?tab=rate-limit
+- Considérer un plan payant pour la production
+
+## 📝 Notes Techniques
+
+### Modèles Gemini utilisés
+- **Web Scraping** : `gemini-flash-latest` (multimodal - texte + image)
+- **Analyse Vidéo** : `gemini-flash-latest` (multimodal - vidéo/audio via inlineData)
+
+### Outils externes
+- **Playwright** : Scraping web avec Chromium
+- **yt-dlp** : Téléchargement de vidéos (Instagram, TikTok)
+- **FFmpeg** : Traitement vidéo (inclus dans Docker)
+
+## 🤝 Contribution
+
+1. Fork le projet
+2. Créer une branche (`git checkout -b feature/amazing-feature`)
+3. Commit les changements (`git commit -m 'Add amazing feature'`)
+4. Push vers la branche (`git push origin feature/amazing-feature`)
+5. Ouvrir une Pull Request
+
+## 📄 Licence
+
+ISC
+
+## 👤 Auteur
+
+RecipeMe Team
+
 ---
 
-## 🧠 Logique de Scraping ("Smart Fallback")
-
-Pour garantir un taux de succès de ~99%, le scraper utilise une stratégie en cascade :
-
-1.  **Tentative UI** : Clic sur "Afficher plus", suppression des modales de login, scroll pour charger les commentaires.
-2.  **Extraction DOM** : Récupération du texte visible complet (`FULL_VISIBLE_BODY`) et de la légende spécifique (`PRIORITY_CAPTION`).
-3.  **Extraction Meta (Fallback)** : Si le DOM est bloqué, récupération de la `Meta Description` et du `JSON-LD` (données structurées cachées pour Google).
-4.  **Vision IA** : En dernier recours ou en complément, une capture d'écran est envoyée à Gemini pour lire le texte incrusté dans l'image/vidéo.
-
----
-
-## 🌍 Déploiement (Hetzner / VPS)
-
-Ce service est conçu pour fonctionner de pair avec la Webapp RecipeMe (Next.js).
-
-Dans votre `docker-compose.yml` global :
-1.  Mettez ce service et la Webapp dans le même `network`.
-2.  La Webapp doit appeler le scraper via son nom de conteneur : `http://scraper:5000/process`.
-3.  Pas besoin d'exposer le port 5000 sur Internet (sécurité), laissez-le en interne.
-
----
-
-## 👨‍💻 Auteur
-
-Créé avec passion par **Chhaju**.
-👉 Portfolio : [chhaju.fr](https://chhaju.fr)
-
-*Fait avec ❤️ (et beaucoup de café) pour RecipeMe.*
+**Version** : 1.0.0  
+**Dernière mise à jour** : Janvier 2025

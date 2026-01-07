@@ -2,7 +2,6 @@ import { chromium } from 'playwright-extra';
 import stealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { ScrapedData } from '../types';
 
-// Apply stealth plugin to Playwright (via playwright-extra)
 chromium.use(stealthPlugin());
 
 const USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
@@ -29,15 +28,12 @@ export class ScraperService {
 
       const page = await context.newPage();
 
-      // Navigate
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
       
-      // Wait for initial load
       try {
         await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
       } catch (e) {}
 
-      // --- 1. AGGRESSIVE LOGIN MODAL REMOVAL ---
       const removeModals = async () => {
         await page.evaluate(() => {
           const selectors = [
@@ -64,7 +60,6 @@ export class ScraperService {
 
       await removeModals();
 
-      // --- 2. EXPAND CAPTION (FORCE BRUTE) ---
       try {
         console.log('[Scraper] Attempting to expand caption...');
         const moreButtons = await page.getByRole('button', { name: /more|plus|suite/i }).all();
@@ -76,7 +71,6 @@ export class ScraperService {
         }
       } catch (e) {}
 
-      // --- 3. SCROLL & CAPTURE COMMENTS ---
       console.log('[Scraper] Scrolling for comments...');
       
       try {
@@ -107,7 +101,6 @@ export class ScraperService {
       comments = [...new Set(comments)].slice(0, 20);
       console.log(`[Scraper] Found ${comments.length} comments.`);
 
-      // --- 4. DATA EXTRACTION ---
       const jsonLd = await page.evaluate(() => {
         const scripts = document.querySelectorAll('script[type="application/ld+json"]');
         return Array.from(scripts).map(s => s.textContent).join('\n');
@@ -119,7 +112,6 @@ export class ScraperService {
 
       const visibleText = await page.evaluate(() => document.body.innerText);
 
-      // Extract specific caption from DOM with relaxed typing for HTMLElement
       const specificCaption = await page.evaluate(() => {
          const h1 = document.querySelector('h1');
          
@@ -142,7 +134,6 @@ export class ScraperService {
         FULL_VISIBLE_BODY: ${visibleText}
       `;
 
-      // Take screenshot
       await page.evaluate(() => window.scrollTo(0, 0));
       await page.waitForTimeout(500);
       const buffer = await page.screenshot({ fullPage: false, type: 'jpeg', quality: 70 });
@@ -163,7 +154,6 @@ export class ScraperService {
       console.error('[Scraper] Error scraping URL:', error);
       throw error;
     } finally {
-      // Force cleanup
       if (browser) {
           try {
               await browser.close();
