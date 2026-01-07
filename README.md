@@ -5,360 +5,197 @@ API intelligente de scraping et d'extraction de recettes depuis les réseaux soc
 ## 🎯 Fonctionnalités
 
 ### Scraping Hybride Intelligent
-- **Scraping Web** : Extraction automatique depuis le DOM, meta tags et screenshots
-- **Analyse Vidéo IA** : Fallback automatique vers l'analyse vidéo/audio si les données web sont incomplètes
-- **Détection d'incomplétude** : Gemini détecte automatiquement si les informations extraites sont insuffisantes et bascule sur l'analyse vidéo
+
+* **Scraping Web** : Extraction automatique depuis le DOM, meta tags et screenshots.
+* **Analyse Vidéo IA** : Fallback automatique vers l'analyse vidéo/audio si les données web sont incomplètes.
+* **Détection d'incomplétude** : Gemini détecte automatiquement si les informations extraites sont insuffisantes et bascule sur l'analyse vidéo.
 
 ### Analyse Multimodale
-- **Vision** : Analyse des screenshots et images
-- **Audio + Vidéo** : Analyse complète des vidéos (visuel + audio) pour extraire les recettes
-- **Optimisation RAM** : Limitation à 720p pour économiser la mémoire
+
+* **Vision** : Analyse des screenshots et images.
+* **Audio + Vidéo** : Analyse complète des vidéos (visuel + audio) pour extraire les recettes.
+* **Optimisation RAM** : Limitation à 720p pour économiser la mémoire.
 
 ### Métriques et Monitoring
-- **Tokens Gemini** : Suivi des tokens d'entrée, de sortie et totaux
-- **Coûts estimés** : Calcul automatique des coûts en EUR par requête
-- **Ressources système** : Monitoring CPU, RAM, réseau et disque
-- **Méthode utilisée** : Indication claire de la méthode (web_scraping ou video_ai)
+
+* **Tokens Gemini** : Suivi des tokens d'entrée, de sortie et totaux.
+* **Coûts estimés** : Calcul automatique des coûts en EUR par requête.
+* **Ressources système** : Monitoring CPU, RAM, réseau et disque.
+
+## 🛡️ Challenges Techniques & Solutions
+
+Le déploiement de ce scraper sur une infrastructure Cloud (type Hetzner/AWS) a nécessité de surmonter plusieurs défis techniques liés aux protections anti-bot et à l'architecture Docker.
+
+### 1. Blocage des IPs Datacenter (Instagram)
+
+Les réseaux sociaux bloquent agressivement les requêtes provenant d'adresses IP de centres de données (Hetzner, AWS) lorsqu'elles sont anonymes, renvoyant des erreurs 429 ou des redirections de login.
+
+* **Solution** : Implémentation d'un système d'authentification par cookies (`cookies.txt` au format Netscape). Cela permet d'authentifier la requête comme venant d'un utilisateur légitime, contournant le blocage géographique/IP.
+
+### 2. Gestion des Permissions Docker (Read-Only)
+
+La librairie `yt-dlp` tente par défaut de réécrire le fichier de cookies pour maintenir la session, ce qui échoue dans un conteneur Docker où les montages sont souvent en lecture seule ou détenus par root (`OSError: Read-only file system`).
+
+* **Solution** : Le service effectue une copie à la volée du fichier `cookies.txt` vers le répertoire temporaire du conteneur (`/tmp`) avant chaque exécution. Cela garantit l'accès en écriture nécessaire sans corrompre le fichier source.
+
+### 3. Fragmentation des Formats Vidéo
+
+Les formats de diffusion (Reels) changent fréquemment (audio séparé, conteneurs mp4/webm), faisant échouer les stratégies de téléchargement strictes.
+
+* **Solution** : Mise en place d'un algorithme de **Fallback en cascade**. L'API tente plusieurs stratégies de la plus précise à la plus générique (ex: "720p Optimized" → "MP4 Fallback" → "Best Available"), assurant un taux de succès maximal.
+
+> **⚖️ Note Éthique & Légale** : L'utilisation de cookies permet l'interopérabilité technique nécessaire au fonctionnement sur serveur. Cependant, ce projet est conçu pour un usage personnel, éducatif ou de démonstration. Le scraping massif de données peut violer les Conditions d'Utilisation (ToS) des plateformes. Il est recommandé d'utiliser un compte dédié secondaire et de respecter des délais raisonnables entre les requêtes.
 
 ## 🏗️ Architecture
 
-```
-┌─────────────────┐
-│   Client API    │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Express API    │ ◄── Rate Limiting, CORS, Helmet
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   P-Queue       │ ◄── Concurrency: 1 (optimisé 4GB RAM)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Scraper Service │ ──► Playwright (Chromium)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   AI Service    │ ──► Gemini Flash (Web Scraping)
-└────────┬────────┘
-         │
-         ├─── Données incomplètes ? ──►
-         │
-         ▼
-┌─────────────────┐
-│ Video Agent     │ ──► yt-dlp + Gemini 1.5 Flash (Vidéo)
-└─────────────────┘
+```mermaid
+graph TD
+    Client[Client API] --> Express[Express API]
+    Express --> Queue[P-Queue (Concurrency: 1)]
+    Queue --> Scraper[Scraper Service]
+    Scraper -->|Playwright| Web[Web Analysis]
+    Web --> Check{Data Complete?}
+    Check -->|Yes| Return[Return JSON]
+    Check -->|No| VideoAgent[Video Agent]
+    VideoAgent -->|Cookies Auth| YTDLP[yt-dlp]
+    YTDLP -->|Video File| Gemini[Gemini 1.5 Flash]
+    Gemini --> Return
+
 ```
 
 ## 📋 Prérequis
 
-- **Node.js** 20+ (ou Docker)
-- **Docker** et **Docker Compose** (recommandé)
-- **Clé API Google Gemini** (`GEMINI_API_KEY`)
-- **Serveur** : Minimum 4GB RAM (optimisé pour Hetzner VPS)
+* **Node.js** 20+ (ou Docker)
+* **Docker** et **Docker Compose**
+* **Clé API Google Gemini** (`GEMINI_API_KEY`)
+* **Fichier Cookies** : Un fichier `cookies.txt` (format Netscape) exporté depuis un navigateur connecté.
 
 ## 🚀 Installation
 
 ### Option 1 : Docker (Recommandé)
 
 1. **Cloner le repository**
+
 ```bash
 git clone <repository-url>
 cd scraper-api
+
 ```
 
-2. **Configurer les variables d'environnement**
+2. **Configuration**
+
 ```bash
 cp .env.example .env
-# Éditer .env et ajouter votre GEMINI_API_KEY
+# Ajouter votre GEMINI_API_KEY dans le fichier .env
+
 ```
 
-3. **Construire et démarrer**
-```bash
-docker-compose up --build -d
-```
+3. **Préparation des Cookies**
+* Installez l'extension "Get cookies.txt LOCALLY" (Chrome/Firefox).
+* Connectez-vous à Instagram sur votre navigateur.
+* Exportez les cookies dans un fichier nommé `cookies.txt`.
+* Placez ce fichier à la racine du projet.
 
-4. **Vérifier le statut**
+
+4. **Démarrage**
+
 ```bash
-curl http://localhost:5000/health
+docker compose up --build -d
+
 ```
 
 ### Option 2 : Installation Locale
 
-1. **Installer les dépendances**
 ```bash
 npm install
-```
-
-2. **Configurer l'environnement**
-```bash
-cp .env.example .env
-# Éditer .env
-```
-
-3. **Build TypeScript**
-```bash
 npm run build
-```
-
-4. **Démarrer l'API**
-```bash
 npm start
-# ou en mode développement
-npm run dev
+
 ```
 
 ## 🔧 Configuration
 
-### Variables d'environnement
-
-Créer un fichier `.env` à la racine :
+### Variables d'environnement (.env)
 
 ```env
-# API Configuration
 PORT=5000
-
-# Google Gemini API
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# CORS (optionnel)
-ALLOWED_ORIGIN=*
-
-# Environment
+GEMINI_API_KEY=votre_cle_api_ici
 NODE_ENV=production
+# Optionnel : Chemin personnalisé vers les cookies
+COOKIES_PATH=/app/cookies.txt
+
 ```
 
-### Docker Compose - Limites de ressources
+### Volume Docker
 
-Le fichier `docker-compose.yml` est configuré pour un serveur 4GB RAM :
+Le fichier `docker-compose.yml` doit monter le fichier de cookies :
 
 ```yaml
-deploy:
-  resources:
-    limits:
-      cpus: '1.50'
-      memory: 3G
-    reservations:
-      memory: 512M
+services:
+  scraper-api:
+    volumes:
+      - ./cookies.txt:/app/cookies.txt:ro  # Montage en lecture seule (copié dans /tmp par l'app)
+
 ```
 
 ## 📡 Utilisation de l'API
 
 ### Endpoint : `/process`
 
-Extrait une recette depuis une URL Instagram ou TikTok.
-
 **Requête :**
+
 ```bash
 POST http://localhost:5000/process
 Content-Type: application/json
 
 {
-  "url": "https://www.instagram.com/reel/ABC123/",
-  "forceVideo": false  // Optionnel : force l'analyse vidéo
+  "url": "https://www.instagram.com/reel/DRNDWfBiFpn/",
+  "forceVideo": false
 }
+
 ```
 
-**Réponse (Succès) :**
+**Réponse (Exemple Succès) :**
+
 ```json
 {
   "success": true,
   "method": "video_ai",
   "data": {
-    "id": "uuid",
-    "title": "Pasta Carbonara",
-    "ingredients": [
-      "200g de pâtes",
-      "100g de lardons",
-      "2 œufs",
-      "50g de parmesan"
-    ],
-    "steps": [
-      "Cuire les pâtes",
-      "Faire revenir les lardons",
-      "Mélanger avec les œufs et le parmesan"
-    ],
-    "prep_time": "10 min",
-    "cook_time": "15 min",
-    "servings": "2 personnes",
-    "tips": ["Utiliser du parmesan frais"],
-    "source_url": "https://www.instagram.com/reel/ABC123/",
-    "image_url": "https://..."
+    "title": "Filet de poisson blanc sauce crémeuse",
+    "ingredients": ["Cabillaud", "Moutarde", "Crème", "Haricots verts"],
+    "steps": ["Saisir le poisson", "Préparer la sauce", "Servir chaud"],
+    "time": "20 min"
   },
   "usage": {
-    "promptTokens": 150000,
-    "candidatesTokens": 5000,
-    "totalTokens": 155000,
-    "costEUR": 0.013845
+    "totalTokens": 18288,
+    "costEUR": 0.0013
   }
 }
+
 ```
 
-**Réponse (Erreur) :**
-```json
-{
-  "success": false,
-  "error": "Failed to process recipe",
-  "message": "Invalid URL provided"
-}
-```
+## 💰 Coûts et Performance
 
-### Endpoint : `/health`
+L'API utilise **Gemini 1.5 Flash**, choisi pour son excellent rapport performance/coût sur l'analyse multimodale.
 
-Vérifie le statut de l'API.
+| Méthode | Coût Moyen (EUR) | Tokens Moyens |
+| --- | --- | --- |
+| **Web Scraping** (Texte seul) | ~0.0002 € | 1k - 3k |
+| **Analyse Vidéo** (Vision + Audio) | ~0.0015 € | 15k - 25k |
 
-**Requête :**
-```bash
-GET http://localhost:5000/health
-```
-
-**Réponse :**
-```json
-{
-  "status": "ok",
-  "queueSize": 0,
-  "pending": 0,
-  "memory": "77.18 MB"
-}
-```
-
-## 🧪 Tests
-
-Un script de test complet est fourni pour valider le fonctionnement :
-
-```bash
-node test-api.js
-```
-
-Le script :
-- ✅ Vérifie la santé de l'API
-- ✅ Teste chaque URL du tableau `testUrls`
-- ✅ Affiche les métriques détaillées (tokens, coûts, ressources)
-- ✅ Génère un résumé global avec coûts totaux
-
-**Configuration des tests :**
-Éditer `test-api.js` et modifier le tableau `testUrls` :
-
-```javascript
-const testUrls = [
-  'https://www.instagram.com/reel/ABC123/',
-  'https://vm.tiktok.com/XYZ789/',
-];
-```
-
-## 💰 Coûts Gemini
-
-### Tarification (Gemini Flash)
-- **Input** : $0.075 / 1M tokens (~0.069 EUR)
-- **Output** : $0.30 / 1M tokens (~0.276 EUR)
-
-### Estimation des coûts
-- **Scraping Web** : ~1,000-5,000 tokens → ~0.0001-0.0005 EUR
-- **Analyse Vidéo** : ~100,000-200,000 tokens → ~0.01-0.02 EUR
-
-Les métriques de coûts sont automatiquement calculées et retournées dans chaque réponse.
-
-### Limites Free Tier
-- **20 requêtes/jour** par modèle
-- **5 requêtes/minute** (depuis décembre 2025)
-- Réinitialisation quotidienne à minuit UTC
-
-Pour une utilisation en production, considérer un plan payant : https://ai.google.dev/pricing
+*Note : L'analyse vidéo consomme plus de tokens car Gemini analyse le flux visuel image par image, mais reste très économique (~1.50€ pour 1000 vidéos).*
 
 ## 🔒 Sécurité
 
-- **Rate Limiting** : 100 requêtes / 15 minutes par IP
-- **Helmet.js** : Protection des headers HTTP
-- **CORS** : Configuration restrictive
-- **Validation** : Validation des URLs avec Zod
-- **SSRF Protection** : Vérification des URLs pour éviter les attaques SSRF
-- **Docker** : Isolation des processus
-
-## 📊 Optimisations
-
-### Gestion de la RAM (4GB serveur)
-- ✅ Limitation de la qualité vidéo à 720p max
-- ✅ Garbage Collection manuel (`--expose-gc`)
-- ✅ Queue avec concurrency = 1
-- ✅ Nettoyage automatique des fichiers temporaires
-- ✅ Limites Docker (3GB RAM max)
-
-### Performance
-- ✅ Cache des dépendances Docker
-- ✅ Timeout configurable (5 minutes par défaut)
-- ✅ Gestion d'erreurs robuste
-- ✅ Logging structuré avec Pino
-
-## 📁 Structure du Projet
-
-```
-scraper-api/
-├── src/
-│   ├── index.ts              # Point d'entrée Express
-│   ├── services/
-│   │   ├── scraper.ts        # Service de scraping web
-│   │   ├── ai.ts             # Service AI (Gemini) pour scraping
-│   │   └── videoAgent.ts     # Service d'analyse vidéo
-│   ├── types/
-│   │   └── index.ts          # Types TypeScript
-│   └── utils/
-│       └── security.ts       # Validation et sécurité
-├── test-api.js               # Script de test
-├── Dockerfile                # Image Docker
-├── docker-compose.yml        # Configuration Docker Compose
-├── package.json
-└── README.md
-```
-
-## 🔍 Logs
-
-Les logs sont structurés avec Pino et incluent :
-- Niveau de log (info, warn, error)
-- Timestamp
-- Métadonnées contextuelles (URL, méthode, tokens, coûts)
-
-En développement, les logs sont formatés avec `pino-pretty`.
-
-## 🐛 Dépannage
-
-### Le conteneur redémarre en boucle
-- Vérifier que `GEMINI_API_KEY` est défini dans `.env`
-- Vérifier les logs : `docker-compose logs -f`
-
-### Erreur "Garbage Collector not available"
-- Normal en développement local
-- En production, le script `start` inclut `--expose-gc`
-
-### Timeout sur les vidéos longues
-- Augmenter `API_TIMEOUT` dans `src/index.ts` (par défaut 5 minutes)
-
-### Consommation RAM élevée
-- Vérifier les limites Docker dans `docker-compose.yml`
-- Réduire la qualité vidéo dans `videoAgent.ts` (actuellement 720p)
-
-### Erreur 429 (Quota API dépassé)
-- Le free tier Gemini limite à 20 requêtes/jour
-- Attendre la réinitialisation quotidienne (minuit UTC)
-- Vérifier l'usage : https://ai.dev/usage?tab=rate-limit
-- Considérer un plan payant pour la production
-
-## 📝 Notes Techniques
-
-### Modèles Gemini utilisés
-- **Web Scraping** : `gemini-flash-latest` (multimodal - texte + image)
-- **Analyse Vidéo** : `gemini-flash-latest` (multimodal - vidéo/audio via inlineData)
-
-### Outils externes
-- **Playwright** : Scraping web avec Chromium
-- **yt-dlp** : Téléchargement de vidéos (Instagram, TikTok)
-- **FFmpeg** : Traitement vidéo (inclus dans Docker)
+* **Isolation** : Exécution dans un conteneur Docker sécurisé.
+* **Nettoyage** : Suppression automatique des vidéos téléchargées et cookies temporaires après analyse.
+* **Rate Limiting** : Protection contre les abus d'API.
+* **Confidentialité** : Les cookies ne sont jamais exposés dans les logs ou les réponses API.
 
 ## 🤝 Contribution
+
+Les contributions sont bienvenues !
 
 1. Fork le projet
 2. Créer une branche (`git checkout -b feature/amazing-feature`)
@@ -370,11 +207,8 @@ En développement, les logs sont formatés avec `pino-pretty`.
 
 ISC
 
-## 👤 Auteur
-
-RecipeMe Team
-
 ---
 
-**Version** : 1.0.0  
-**Dernière mise à jour** : Janvier 2025
+**Version** : 1.1.0
+
+**Auteur** : Chhaju CHAKMA
