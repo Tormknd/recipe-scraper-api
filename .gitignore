@@ -67,7 +67,7 @@ src/test-models*.ts
 dist/test-models*.js
 
 # Cookies (sensible - à mettre manuellement sur le serveur)
-# cookies.txt
+cookies.txt
 
 
 
