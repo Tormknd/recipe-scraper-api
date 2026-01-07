@@ -30,12 +30,23 @@ async function downloadVideo(url: string, outputFilename: string): Promise<strin
   const tmpDir = os.tmpdir();
   const outputPath = path.resolve(tmpDir, outputFilename);
   
-  // Vérifier si le fichier cookies existe
-  const hasCookies = fs.existsSync(COOKIES_PATH);
-  const cookiesArg = hasCookies ? `--cookies "${COOKIES_PATH}"` : '';
+  // Copier les cookies vers un fichier temporaire inscriptible
+  // (yt-dlp essaie de mettre à jour les cookies à la fin, ce qui échoue si le fichier est en lecture seule)
+  let cookiesArg = '';
+  let tempCookiesPath: string | null = null;
   
-  if (hasCookies) {
-    console.log(`🍪 Using cookies from: ${COOKIES_PATH}`);
+  if (fs.existsSync(COOKIES_PATH)) {
+    tempCookiesPath = path.join(tmpDir, `cookies_${Date.now()}.txt`);
+    try {
+      fs.copyFileSync(COOKIES_PATH, tempCookiesPath);
+      cookiesArg = `--cookies "${tempCookiesPath}"`;
+      console.log(`🍪 Using cookies (copied to temp file for write access)`);
+    } catch (copyError) {
+      console.warn(`⚠️ Failed to copy cookies to temp file: ${copyError}`);
+      // Fallback: utiliser le fichier original même si en lecture seule
+      cookiesArg = `--cookies "${COOKIES_PATH}"`;
+      console.log(`🍪 Using cookies from: ${COOKIES_PATH} (read-only, may fail at end)`);
+    }
   } else {
     console.warn(`⚠️ No cookies file found at ${COOKIES_PATH} - Instagram may block requests from datacenter IP`);
   }
@@ -84,6 +95,26 @@ async function downloadVideo(url: string, outputFilename: string): Promise<strin
     } catch (error: any) {
       const errorMsg = error.message || String(error);
       const fullError = error.stderr || error.stdout || errorMsg;
+      
+      // Vérifier si le fichier a été téléchargé malgré l'erreur
+      // (yt-dlp peut échouer à la fin en essayant de sauvegarder les cookies, mais la vidéo est là)
+      if (fs.existsSync(outputPath)) {
+        const stats = fs.statSync(outputPath);
+        if (stats.size > 0) {
+          const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+          console.log(`✅ Video downloaded successfully: ${sizeMB}MB (despite error at end - likely cookie save issue)`);
+          // Nettoyer le fichier cookies temporaire avant de retourner
+          if (tempCookiesPath && fs.existsSync(tempCookiesPath)) {
+            try {
+              fs.unlinkSync(tempCookiesPath);
+            } catch (e) {
+              // Ignore cleanup errors
+            }
+          }
+          return outputPath;
+        }
+      }
+      
       console.warn(`⚠️ Strategy "${strategy.name}" failed: ${errorMsg.substring(0, 150)}`);
       
       // Log plus détaillé pour debug
@@ -91,6 +122,8 @@ async function downloadVideo(url: string, outputFilename: string): Promise<strin
         console.error('❌ Rate limit détecté (429) - IP bloquée par Instagram');
       } else if (fullError.includes('401') || fullError.includes('Unauthorized') || fullError.includes('Login')) {
         console.error('❌ Authentification requise - Vérifiez les cookies');
+      } else if (fullError.includes('Read-only file system') || fullError.includes('OSError: [Errno 30]')) {
+        console.warn('⚠️ Cookie save error (read-only) - but download may have succeeded, checking file...');
       }
       
       if (fs.existsSync(outputPath)) {
@@ -101,6 +134,15 @@ async function downloadVideo(url: string, outputFilename: string): Promise<strin
         }
       }
       continue;
+    }
+  }
+  
+  // Nettoyer le fichier cookies temporaire
+  if (tempCookiesPath && fs.existsSync(tempCookiesPath)) {
+    try {
+      fs.unlinkSync(tempCookiesPath);
+    } catch (e) {
+      // Ignore cleanup errors
     }
   }
   
