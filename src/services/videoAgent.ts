@@ -150,13 +150,23 @@ async function downloadVideo(url: string, outputFilename: string): Promise<strin
   throw new Error(`Impossible de télécharger la vidéo (toutes les stratégies ont échoué)${cookiesInfo}. Vérifiez les logs ci-dessus pour plus de détails.`);
 }
 
-export async function processVideoRecipe(url: string): Promise<{ recipe: Recipe; usage?: UsageMetrics } | null> {
+export async function processVideoRecipe(
+  url: string, 
+  onProgress?: (stage: string, message: string, percentage: number) => void
+): Promise<{ recipe: Recipe; usage?: UsageMetrics } | null> {
   const timestamp = Date.now();
   const tempFilename = `recipe_${timestamp}.mp4`;
   let localPath: string | null = null;
 
   try {
+    if (onProgress) {
+      onProgress('video_download', 'Téléchargement de la vidéo...', 50);
+    }
     localPath = await downloadVideo(url, tempFilename);
+    
+    if (onProgress) {
+      onProgress('video_analysis', 'Analyse du flux audio...', 70);
+    }
 
     const fileBuffer = fs.readFileSync(localPath);
     const fileBase64 = fileBuffer.toString('base64');
@@ -190,6 +200,10 @@ export async function processVideoRecipe(url: string): Promise<{ recipe: Recipe;
       Retourne uniquement le JSON sans markdown.
     `;
 
+    if (onProgress) {
+      onProgress('ai_extraction', 'Extraction des ingrédients avec Gemini...', 80);
+    }
+    
     console.log('🧠 Gemini is watching and listening...');
     
     const result = await model.generateContent([

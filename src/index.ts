@@ -9,7 +9,7 @@ import { ScraperService } from './services/scraper';
 import { AIService } from './services/ai';
 import { processVideoRecipe } from './services/videoAgent';
 import { validateRequest } from './utils/security';
-import { UsageMetrics, Recipe } from './types';
+import { UsageMetrics, Recipe, ProgressInfo } from './types';
 
 dotenv.config();
 
@@ -94,9 +94,17 @@ app.post('/process', async (req: Request, res: Response) => {
       let recipe: Recipe | null = null;
       let method = 'web_scraping';
       const usageMetrics: (UsageMetrics | undefined)[] = [];
+      let currentProgress: ProgressInfo | undefined;
+      
+      // Fonction helper pour mettre à jour la progression
+      const updateProgress = (stage: string, message: string, percentage: number) => {
+        currentProgress = { stage, message, percentage };
+        logger.info({ url, stage, message, percentage }, 'Progress update');
+      };
       
       try {
         // A. Scraping
+        updateProgress('scraping', 'Récupération du contenu...', 10);
         logger.info({ url }, 'Step 1: Starting web scraping...');
         const scrapedData = await scraper.scrapeUrl(url);
         logger.info({ 
@@ -106,6 +114,7 @@ app.post('/process', async (req: Request, res: Response) => {
         }, 'Scraping completed');
         
         // B. AI Analysis
+        updateProgress('ai_analysis', 'Analyse du contenu avec Gemini...', 40);
         logger.info({ url }, 'Step 2: Starting AI extraction from scraped data...');
         const { recipe: extractedRecipe, isIncomplete, usage: scrapingUsage } = await aiService.extractRecipe(scrapedData);
         
@@ -146,8 +155,9 @@ app.post('/process', async (req: Request, res: Response) => {
           }, 'Recipe incomplete - Switching to video analysis');
           
           try {
+            updateProgress('video_download', 'Téléchargement de la vidéo...', 50);
             logger.info({ url }, 'Step 3: Starting video download and analysis...');
-            const videoResult = await processVideoRecipe(url);
+            const videoResult = await processVideoRecipe(url, updateProgress);
             
             if (videoResult && videoResult.recipe) {
               const videoSteps = videoResult.recipe.steps?.length || 0;
@@ -200,7 +210,8 @@ app.post('/process', async (req: Request, res: Response) => {
         }, 'Web scraping failed, trying video analysis as fallback');
         
         try {
-          const videoResult = await processVideoRecipe(url);
+          updateProgress('video_download', 'Téléchargement de la vidéo...', 50);
+          const videoResult = await processVideoRecipe(url, updateProgress);
           if (videoResult && videoResult.recipe) {
             recipe = videoResult.recipe;
             method = 'video_ai';
@@ -233,6 +244,8 @@ app.post('/process', async (req: Request, res: Response) => {
         costEUR: 0
       } : undefined;
       
+      updateProgress('finalization', 'Structuration de la recette...', 90);
+      
       logger.info({ 
         url, 
         method,
@@ -242,7 +255,7 @@ app.post('/process', async (req: Request, res: Response) => {
         totalTokens
       }, 'Processing completed - Recipe ready');
       
-      return { recipe, method, usage: aggregatedUsage };
+      return { recipe, method, usage: aggregatedUsage, progress: currentProgress };
     });
 
     logger.info({ 
@@ -256,6 +269,7 @@ app.post('/process', async (req: Request, res: Response) => {
       success: true, 
       method: result.method,
       data: result.recipe,
+      progress: result.progress, // Inclure le dernier message de progression
       usage: result.usage
     });
 

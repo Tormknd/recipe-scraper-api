@@ -30,10 +30,17 @@ export interface UsageMetrics {
   costEUR?: number; // Coût estimé en euros
 }
 
+export interface ProgressInfo {
+  stage?: string;
+  message?: string;
+  percentage?: number;
+}
+
 export interface ProcessingResponse {
   success: boolean;
   method?: 'web_scraping' | 'video_ai';
   data?: Recipe;
   error?: string;
+  progress?: ProgressInfo; // Messages de progression (optionnel, pour compatibilité)
   usage?: UsageMetrics; // Métriques d'utilisation (tokens, coûts)
 }
