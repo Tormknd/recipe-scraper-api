@@ -121,6 +121,8 @@ npm start
 PORT=5000
 GEMINI_API_KEY=votre_cle_api_ici
 NODE_ENV=production
+# Base de données (SQLite par défaut)
+DATABASE_URL="file:./prisma/dev.db"
 # Optionnel : Chemin personnalisé vers les cookies
 COOKIES_PATH=/app/cookies.txt
 
@@ -150,7 +152,10 @@ Content-Type: application/json
 
 {
   "url": "https://www.instagram.com/reel/DRNDWfBiFpn/",
-  "forceVideo": false
+  "forceVideo": false,
+  "save": true,
+  "tagIds": ["id_tag1"],
+  "folderId": "id_dossier_ou_null"
 }
 
 ```
@@ -162,11 +167,13 @@ Content-Type: application/json
   "success": true,
   "method": "video_ai",
   "data": {
+    "id": "clx...",
     "title": "Filet de poisson blanc sauce crémeuse",
     "ingredients": ["Cabillaud", "Moutarde", "Crème", "Haricots verts"],
     "steps": ["Saisir le poisson", "Préparer la sauce", "Servir chaud"],
-    "time": "20 min"
+    "source_url": "https://..."
   },
+  "saved": true,
   "usage": {
     "totalTokens": 18288,
     "costEUR": 0.0013
@@ -174,6 +181,13 @@ Content-Type: application/json
 }
 
 ```
+
+### Recettes, tags et dossiers
+
+- **GET /recipes?q=...&tagIds=id1,id2&folderId=...** — Liste avec recherche (titre, ingrédients, étapes) et filtres par tags (tous requis) et dossier.
+- **GET /recipes/:id** — Détail. **POST /recipes** — Créer (body : title, ingredients, steps, source_url, tagIds, folderId). **PATCH /recipes/:id** — Modifier. **DELETE /recipes/:id** — Supprimer.
+- **GET /tags** — Liste des tags. **POST /tags** — Créer (body : `{ "name": "sucré" }`).
+- **GET /folders** — Liste des dossiers. **GET /folders/:id** — Détail + recettes. **POST /folders** — Créer. **PATCH /folders/:id** — Renommer. **DELETE /folders/:id** — Supprimer (recettes conservées).
 
 ## 💰 Coûts et Performance
 

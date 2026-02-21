@@ -39,6 +39,10 @@ const safeUrlSchema = z.string().url().refine((val) => {
 });
 
 export const validateRequest = z.object({
-  url: safeUrlSchema
+  url: safeUrlSchema,
+  forceVideo: z.boolean().optional(),
+  save: z.boolean().optional(),
+  tagIds: z.array(z.string()).optional(),
+  folderId: z.string().nullable().optional(),
 });
 

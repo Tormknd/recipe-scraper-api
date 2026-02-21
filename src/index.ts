@@ -9,7 +9,12 @@ import { ScraperService } from './services/scraper';
 import { AIService } from './services/ai';
 import { processVideoRecipe } from './services/videoAgent';
 import { validateRequest } from './utils/security';
-import { UsageMetrics, Recipe, ProgressInfo } from './types';
+import { UsageMetrics, Recipe, ProgressInfo, ProcessingResponse } from './types';
+import { prisma } from './db';
+import { appRecipeToPrismaPayload } from './utils/recipeMapper';
+import recipesRouter from './routes/recipes';
+import tagsRouter from './routes/tags';
+import foldersRouter from './routes/folders';
 
 dotenv.config();
 
@@ -47,10 +52,15 @@ app.use(limiter);
 
 // CORS Restrictif (A configurer pour la prod)
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGIN || '*', // Idéalement: 'https://chhaju.fr'
-  methods: ['POST'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  origin: process.env.ALLOWED_ORIGIN || '*',
+  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// --- ROUTES RECETTES, TAGS, DOSSIERS ---
+app.use('/recipes', recipesRouter);
+app.use('/tags', tagsRouter);
+app.use('/folders', foldersRouter);
 
 // --- SERVICES ---
 const scraper = new ScraperService();
@@ -83,7 +93,7 @@ app.post('/process', async (req: Request, res: Response) => {
     });
   }
 
-  const { url } = validation.data;
+  const { url, save: saveRecipe, tagIds, folderId } = validation.data;
   logger.info({ url }, 'Request queued');
 
   // 2. Traitement via la Queue
@@ -264,14 +274,38 @@ app.post('/process', async (req: Request, res: Response) => {
       tokens: result.usage?.totalTokens,
       stepsCount: result.recipe.steps?.length || 0
     }, 'Request completed successfully');
-    
-    return res.json({ 
-      success: true, 
-      method: result.method,
-      data: result.recipe,
-      progress: result.progress, // Inclure le dernier message de progression
-      usage: result.usage
-    });
+
+    let savedId: string | undefined;
+    if (saveRecipe && result.recipe) {
+      try {
+        const payload = appRecipeToPrismaPayload(result.recipe);
+        const created = await prisma.recipe.create({
+          data: {
+            ...payload,
+            folderId: folderId ?? undefined,
+          },
+        });
+        savedId = created.id;
+        if (tagIds && tagIds.length > 0) {
+          await prisma.recipeTag.createMany({
+            data: tagIds.map((tagId) => ({ recipeId: created.id, tagId })),
+          });
+        }
+        logger.info({ url, recipeId: created.id }, 'Recipe saved to database');
+      } catch (saveErr: unknown) {
+        logger.warn({ url, err: saveErr }, 'Failed to save recipe after process');
+      }
+    }
+
+    const responsePayload = {
+      success: true,
+      method: result.method as 'web_scraping' | 'video_ai',
+      data: { ...result.recipe, ...(savedId ? { id: savedId } : {}) },
+      progress: result.progress,
+      usage: result.usage,
+      ...(savedId ? { saved: true } : {}),
+    };
+    return res.json(responsePayload as ProcessingResponse);
 
   } catch (error: any) {
     logger.error({ 

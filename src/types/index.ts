@@ -40,7 +40,8 @@ export interface ProcessingResponse {
   success: boolean;
   method?: 'web_scraping' | 'video_ai';
   data?: Recipe;
+  saved?: boolean; // true si la recette a été enregistrée en base après extraction
   error?: string;
-  progress?: ProgressInfo; // Messages de progression (optionnel, pour compatibilité)
-  usage?: UsageMetrics; // Métriques d'utilisation (tokens, coûts)
+  progress?: ProgressInfo;
+  usage?: UsageMetrics;
 }

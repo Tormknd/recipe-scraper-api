@@ -57,6 +57,10 @@ playwright-report/
 blob-report/
 playwright/.cache/
 
+# SQLite DB (local dev)
+prisma/dev.db
+prisma/*.db
+
 # Optional: Jina/Temp files
 temp/
 tmp/

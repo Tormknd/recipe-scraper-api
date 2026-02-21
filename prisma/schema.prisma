@@ -1,0 +1,55 @@
+// RecipeMe Scraper API - Persistance recettes, tags, dossiers
+// SQLite : pas de JSON natif → ingredients/steps en String (JSON stringifié)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Recipe {
+  id          String   @id @default(cuid())
+  title       String
+  ingredients String   // JSON array stringifié ["a","b"]
+  steps       String   // JSON array stringifié ["1","2"]
+  sourceUrl   String   @map("source_url")
+  imageUrl    String?  @map("image_url")
+  servings    String?
+  prepTime    String?  @map("prep_time")
+  cookTime    String?  @map("cook_time")
+  tips        String?  // JSON array stringifié ou null
+  folderId    String?  @map("folder_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  folder   Folder?    @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  tags     RecipeTag[]
+}
+
+model Tag {
+  id    String @id @default(cuid())
+  name  String @unique
+  recipes RecipeTag[]
+}
+
+model RecipeTag {
+  recipeId String @map("recipe_id")
+  tagId    String @map("tag_id")
+
+  recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([recipeId, tagId])
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  recipes Recipe[]
+}
