@@ -1,9 +1,20 @@
 import type { Recipe as AppRecipe } from '../types';
-import type { Recipe as PrismaRecipe, Tag, Folder } from '@prisma/client';
 
-type PrismaRecipeWithRelations = PrismaRecipe & {
-  tags?: { tag: Tag }[];
-  folder?: Folder | null;
+/** Forme d’une recette Prisma avec relations (évite de dépendre des exports @prisma/client au build) */
+export type PrismaRecipeRow = {
+  id: string;
+  title: string;
+  ingredients: string;
+  steps: string;
+  sourceUrl: string;
+  imageUrl: string | null;
+  servings: string | null;
+  prepTime: string | null;
+  cookTime: string | null;
+  tips: string | null;
+  folderId: string | null;
+  tags?: { tag: { id: string; name: string } }[];
+  folder?: { id: string; name: string } | null;
 };
 
 function parseJsonArray(value: string | null): string[] {
@@ -16,9 +27,9 @@ function parseJsonArray(value: string | null): string[] {
   }
 }
 
-export function prismaRecipeToApp(row: PrismaRecipeWithRelations): AppRecipe & { id: string; tagIds?: string[]; tagNames?: string[]; folderId?: string | null; folderName?: string | null } {
-  const tagNames = row.tags?.map((t) => t.tag.name) ?? [];
-  const tagIds = row.tags?.map((t) => t.tag.id) ?? [];
+export function prismaRecipeToApp(row: PrismaRecipeRow): AppRecipe & { id: string; tagIds?: string[]; tagNames?: string[]; folderId?: string | null; folderName?: string | null } {
+  const tagNames = row.tags?.map((t: { tag: { id: string; name: string } }) => t.tag.name) ?? [];
+  const tagIds = row.tags?.map((t: { tag: { id: string; name: string } }) => t.tag.id) ?? [];
   return {
     id: row.id,
     title: row.title,

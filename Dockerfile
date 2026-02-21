@@ -25,11 +25,14 @@ RUN npm ci
 # 5. Installation des navigateurs Playwright
 RUN npx playwright install chromium --with-deps
 
-# 6. Copie du code source et du fichier cookies (si présent)
-COPY . .
-# Le fichier cookies.txt sera copié si présent (optionnel, peut être monté via volume)
+# 6. Copie du schéma Prisma et génération du client (nécessaire avant le build TS)
+COPY prisma ./prisma
+RUN npx prisma generate
 
-# 7. Build TypeScript
+# 7. Copie du reste du code source
+COPY . .
+
+# 8. Build TypeScript
 RUN npm run build
 
 # Variables d'environnement par défaut

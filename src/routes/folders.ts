@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db';
+import { prismaRecipeToApp, type PrismaRecipeRow } from '../utils/recipeMapper';
 
 const router = Router();
 
@@ -12,6 +13,14 @@ const updateFolderSchema = z.object({
   name: z.string().min(1).max(200).transform((s) => s.trim()),
 });
 
+type FolderWithCount = {
+  id: string;
+  name: string;
+  _count: { recipes: number };
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 /**
  * GET /folders - Liste tous les dossiers (avec nombre de recettes)
  */
@@ -21,7 +30,7 @@ router.get('/', async (_req: Request, res: Response) => {
       orderBy: { name: 'asc' },
       include: { _count: { select: { recipes: true } } },
     });
-    const data = folders.map((f) => ({
+    const data = (folders as FolderWithCount[]).map((f: FolderWithCount) => ({
       id: f.id,
       name: f.name,
       recipeCount: f._count.recipes,
@@ -54,9 +63,8 @@ router.get('/:id', async (req: Request, res: Response) => {
     if (!folder) {
       return res.status(404).json({ success: false, error: 'Dossier introuvable' });
     }
-    const { prismaRecipeToApp } = await import('../utils/recipeMapper');
     const recipes = folder.recipes.map((r) =>
-      prismaRecipeToApp({ ...r, folder: folder })
+      prismaRecipeToApp({ ...r, folder } as PrismaRecipeRow)
     );
     return res.json({
       success: true,
