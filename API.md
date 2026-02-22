@@ -397,3 +397,12 @@ Supprime le dossier. Les recettes ne sont **pas** supprimées : leur `folderId` 
 - **500** : Erreur serveur → `{ "success": false, "error": "Message" }`.
 
 En cas d’erreur, toujours vérifier `success === false` et afficher `error` (et éventuellement `details`) à l’utilisateur.
+
+---
+
+## 7. Cookies (déploiement / TikTok)
+
+L’extraction depuis une URL peut nécessiter des **cookies** (format Netscape) lorsque le serveur est en datacenter (Hetzner, AWS, etc.) :
+
+- **Instagram** : fichier `cookies.txt` exporté depuis instagram.com (variable `COOKIES_PATH`).
+- **TikTok** : les cookies sont **par domaine**. Un fichier exporté depuis Instagram ne suffit pas pour TikTok. Il faut un fichier dédié exporté depuis **tiktok.com** (par ex. `cookies-tiktok.txt`) et configurer `COOKIES_TIKTOK_PATH`. Sans cela, les liens TikTok renvoient souvent « accès refusé » ou « login requis ».

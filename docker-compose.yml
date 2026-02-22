@@ -16,8 +16,10 @@ services:
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
-      # Monte le fichier cookies depuis l'hôte (plus flexible que de le copier dans l'image)
+      # Cookies Instagram (à la racine du projet sur l'hôte)
       - ./cookies.txt:/app/cookies.txt:ro
+      # Cookies TikTok (même principe : crée cookies-tiktok.txt à la racine)
+      - ./cookies-tiktok.txt:/app/cookies-tiktok.txt:ro
     networks:
       - flavorsync-network
     # Limites de ressources pour protéger le serveur 4GB

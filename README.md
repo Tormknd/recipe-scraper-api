@@ -68,7 +68,7 @@ graph TD
 * **Node.js** 20+ (ou Docker)
 * **Docker** et **Docker Compose**
 * **Clé API Google Gemini** (`GEMINI_API_KEY`)
-* **Fichier Cookies** : Un fichier `cookies.txt` (format Netscape) exporté depuis un navigateur connecté.
+* **Fichier(s) Cookies** : Format Netscape (ex. extension "Get cookies.txt LOCALLY"). **Instagram** : `cookies.txt` depuis instagram.com. **TikTok** : les cookies sont **par domaine** — un fichier exporté depuis Instagram ne suffit pas pour TikTok ; il faut exporter depuis tiktok.com dans `cookies-tiktok.txt` (ou `COOKIES_TIKTOK_PATH`).
 
 ## 🚀 Installation
 
@@ -92,10 +92,8 @@ cp .env.example .env
 
 3. **Préparation des Cookies**
 * Installez l'extension "Get cookies.txt LOCALLY" (Chrome/Firefox).
-* Connectez-vous à Instagram sur votre navigateur.
-* Exportez les cookies dans un fichier nommé `cookies.txt`.
-* Placez ce fichier à la racine du projet.
-
+* **Instagram** : connectez-vous à Instagram, exportez les cookies dans `cookies.txt`, placez-le à la racine.
+* **TikTok** : connectez-vous à tiktok.com, exportez les cookies dans `cookies-tiktok.txt` à la racine (ou définissez `COOKIES_TIKTOK_PATH`). Sans cela, les liens TikTok peuvent échouer (blocage / login requis depuis un datacenter).
 
 4. **Démarrage**
 
@@ -123,8 +121,10 @@ GEMINI_API_KEY=votre_cle_api_ici
 NODE_ENV=production
 # Base de données (SQLite par défaut)
 DATABASE_URL="file:./prisma/dev.db"
-# Optionnel : Chemin personnalisé vers les cookies
+# Cookies (format Netscape). Instagram par défaut.
 COOKIES_PATH=/app/cookies.txt
+# Optionnel : cookies TikTok (obligatoire si vous scrapez des liens TikTok depuis un datacenter)
+COOKIES_TIKTOK_PATH=/app/cookies-tiktok.txt
 
 ```
 

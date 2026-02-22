@@ -20,35 +20,52 @@ if (!API_KEY) {
 const genAI = new GoogleGenerativeAI(API_KEY);
 const MODEL_NAME = 'gemini-flash-latest';
 
-// Chemin vers le fichier cookies (dans le conteneur Docker)
-// En production Docker: /app/cookies.txt
-// En dev local: ./cookies.txt à la racine
+// Chemins cookies : par défaut un seul fichier pour tous les domaines
 const COOKIES_PATH = process.env.COOKIES_PATH || path.resolve(process.cwd(), 'cookies.txt');
+const COOKIES_TIKTOK_PATH = process.env.COOKIES_TIKTOK_PATH || path.resolve(process.cwd(), 'cookies-tiktok.txt');
 const USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+
+function isTikTokUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname.includes('tiktok.com') || hostname.includes('vm.tiktok.com');
+  } catch {
+    return false;
+  }
+}
+
+/** Choisit le fichier de cookies selon l’URL : TikTok a son propre domaine, les cookies Instagram ne suffisent pas. */
+function getCookiesPathForUrl(url: string): string {
+  if (isTikTokUrl(url) && fs.existsSync(COOKIES_TIKTOK_PATH)) {
+    return COOKIES_TIKTOK_PATH;
+  }
+  return COOKIES_PATH;
+}
 
 async function downloadVideo(url: string, outputFilename: string): Promise<string> {
   const tmpDir = os.tmpdir();
   const outputPath = path.resolve(tmpDir, outputFilename);
-  
+  const cookiesPath = getCookiesPathForUrl(url);
+  const platform = isTikTokUrl(url) ? 'TikTok' : 'Instagram';
+
   // Copier les cookies vers un fichier temporaire inscriptible
   // (yt-dlp essaie de mettre à jour les cookies à la fin, ce qui échoue si le fichier est en lecture seule)
   let cookiesArg = '';
   let tempCookiesPath: string | null = null;
-  
-  if (fs.existsSync(COOKIES_PATH)) {
+
+  if (fs.existsSync(cookiesPath)) {
     tempCookiesPath = path.join(tmpDir, `cookies_${Date.now()}.txt`);
     try {
-      fs.copyFileSync(COOKIES_PATH, tempCookiesPath);
+      fs.copyFileSync(cookiesPath, tempCookiesPath);
       cookiesArg = `--cookies "${tempCookiesPath}"`;
-      console.log(`🍪 Using cookies (copied to temp file for write access)`);
+      console.log(`🍪 Using cookies for ${platform} (copied to temp file for write access)`);
     } catch (copyError) {
       console.warn(`⚠️ Failed to copy cookies to temp file: ${copyError}`);
-      // Fallback: utiliser le fichier original même si en lecture seule
-      cookiesArg = `--cookies "${COOKIES_PATH}"`;
-      console.log(`🍪 Using cookies from: ${COOKIES_PATH} (read-only, may fail at end)`);
+      cookiesArg = `--cookies "${cookiesPath}"`;
+      console.log(`🍪 Using cookies from: ${cookiesPath} (read-only, may fail at end)`);
     }
   } else {
-    console.warn(`⚠️ No cookies file found at ${COOKIES_PATH} - Instagram may block requests from datacenter IP`);
+    console.warn(`⚠️ No cookies file at ${cookiesPath} - ${platform} may block requests from datacenter IP. For TikTok, export cookies from tiktok.com (see README).`);
   }
   
   const strategies = [
@@ -119,9 +136,9 @@ async function downloadVideo(url: string, outputFilename: string): Promise<strin
       
       // Log plus détaillé pour debug
       if (fullError.includes('429') || fullError.includes('Too Many Requests')) {
-        console.error('❌ Rate limit détecté (429) - IP bloquée par Instagram');
-      } else if (fullError.includes('401') || fullError.includes('Unauthorized') || fullError.includes('Login')) {
-        console.error('❌ Authentification requise - Vérifiez les cookies');
+        console.error(`❌ Rate limit (429) - IP bloquée. ${isTikTokUrl(url) ? 'Pour TikTok, utilisez des cookies exportés depuis tiktok.com (COOKIES_TIKTOK_PATH).' : 'Vérifiez les cookies Instagram.'}`);
+      } else if (fullError.includes('401') || fullError.includes('Unauthorized') || fullError.includes('Login') || fullError.includes('private') || fullError.includes('Log in')) {
+        console.error(`❌ Accès refusé / login requis. Les cookies sont par domaine : pour TikTok, exportez depuis tiktok.com (fichier cookies-tiktok.txt ou COOKIES_TIKTOK_PATH).`);
       } else if (fullError.includes('Read-only file system') || fullError.includes('OSError: [Errno 30]')) {
         console.warn('⚠️ Cookie save error (read-only) - but download may have succeeded, checking file...');
       }
@@ -146,8 +163,11 @@ async function downloadVideo(url: string, outputFilename: string): Promise<strin
     }
   }
   
-  const cookiesInfo = fs.existsSync(COOKIES_PATH) ? ' (cookies utilisés)' : ' (pas de cookies)';
-  throw new Error(`Impossible de télécharger la vidéo (toutes les stratégies ont échoué)${cookiesInfo}. Vérifiez les logs ci-dessus pour plus de détails.`);
+  const cookiesUsed = fs.existsSync(cookiesPath);
+  const hint = isTikTokUrl(url)
+    ? (cookiesUsed ? ' Les cookies Instagram ne marchent pas pour TikTok : exportez depuis tiktok.com (cookies-tiktok.txt ou COOKIES_TIKTOK_PATH).' : ' Pour TikTok, ajoutez des cookies exportés depuis tiktok.com.')
+    : ' (cookies optionnels pour Instagram en datacenter).';
+  throw new Error(`Impossible de télécharger la vidéo${cookiesUsed ? '' : ' (pas de cookies)'}.${hint} Vérifiez les logs ci-dessus.`);
 }
 
 export async function processVideoRecipe(
