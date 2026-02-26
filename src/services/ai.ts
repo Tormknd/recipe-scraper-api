@@ -38,8 +38,8 @@ export class AIService {
       Analyze the provided text, screenshot, and user comments from a social media post to extract a structured recipe.
       
       CONTEXT:
-      - The input contains multiple sources: META_DESCRIPTION (often truncated), JSON_LD, and FULL_VISIBLE_BODY/PRIORITY_CAPTION_DOM.
-      - **CRITICAL**: Prioritize 'FULL_VISIBLE_BODY' and 'PRIORITY_CAPTION_DOM' for the recipe steps and ingredients, as they contain the full untruncated text (e.g. looking for "40min", "enfourner", etc.). META_DESCRIPTION is often cut off.
+      - The input contains: DESCRIPTION_FULL (caption/description complète), META_DESCRIPTION (often truncated), JSON_LD, and FULL_VISIBLE_BODY.
+      - **CRITICAL**: Prioritize 'DESCRIPTION_FULL' for the full recipe text (steps, ingredients, times). Then 'FULL_VISIBLE_BODY'. META_DESCRIPTION is often truncated.
       - The text might be unstructured, contain hashtags, or be incomplete.
       - The screenshot is the primary source of truth if the text is completely blocked.
       - **CRITICAL**: Read the "USER COMMENTS". If users mention corrections (e.g. "Cook at 180C not 160C", "Add more sugar"), add these as "tips".

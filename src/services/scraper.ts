@@ -1,19 +1,44 @@
 import { chromium } from 'playwright-extra';
 import stealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { ScrapedData } from '../types';
+import { loadCookiesForUrl, isTikTokUrl } from '../utils/cookies';
 
 // Apply stealth plugin to Playwright (via playwright-extra)
 chromium.use(stealthPlugin());
 
 const USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
+/** Convertit les cookies parsés en format Playwright (domain requis pour addCookies). */
+function toPlaywrightCookies(
+  cookies: Array<{ name: string; value: string; domain: string; path: string; expires?: number; secure?: boolean }>,
+  url: string
+) {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname;
+    return cookies
+      .filter((c) => hostname.endsWith(c.domain.replace(/^\./, '')) || c.domain === `.${hostname}` || c.domain === hostname)
+      .map((c) => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain.startsWith('.') ? c.domain : `.${c.domain}`,
+        path: c.path || '/',
+        expires: c.expires,
+        secure: c.secure ?? true,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 export class ScraperService {
   async scrapeUrl(url: string): Promise<ScrapedData> {
     console.log(`[Scraper] Starting scrape for: ${url}`);
-    
-    const browser = await chromium.launch({ 
+    const platform = isTikTokUrl(url) ? 'TikTok' : 'Instagram';
+
+    const browser = await chromium.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 
     try {
@@ -24,8 +49,17 @@ export class ScraperService {
         isMobile: true,
         hasTouch: true,
         locale: 'fr-FR',
-        timezoneId: 'Europe/Paris'
+        timezoneId: 'Europe/Paris',
       });
+
+      const rawCookies = loadCookiesForUrl(url);
+      const playwrightCookies = toPlaywrightCookies(rawCookies, url);
+      if (playwrightCookies.length > 0) {
+        await context.addCookies(playwrightCookies);
+        console.log(`[Scraper] Loaded ${playwrightCookies.length} cookies for ${platform}`);
+      } else {
+        console.log(`[Scraper] No cookies for ${platform} - auth wall may block description`);
+      }
 
       const page = await context.newPage();
 
@@ -64,26 +98,32 @@ export class ScraperService {
 
       await removeModals();
 
-      // --- 2. EXPAND CAPTION (FORCE BRUTE) ---
+      // --- 2. EXPAND CAPTION (Instagram "Plus", TikTok "See more", etc.) ---
       try {
-        console.log('[Scraper] Attempting to expand caption...');
-        const moreButtons = await page.getByRole('button', { name: /more|plus|suite/i }).all();
+        console.log('[Scraper] Expanding caption...');
+        const moreButtons = await page.getByRole('button', { name: /more|plus|suite|see more|voir plus|expand|afficher/i }).all();
         for (const btn of moreButtons) {
           if (await btn.isVisible()) {
             await btn.click({ timeout: 1000 }).catch(() => {});
-            await page.waitForTimeout(200);
+            await page.waitForTimeout(300);
+          }
+        }
+        const seeMoreLinks = await page.getByText(/see more|voir plus|more|plus/i).all();
+        for (const el of seeMoreLinks.slice(0, 3)) {
+          if (await el.isVisible()) {
+            await el.click({ timeout: 500 }).catch(() => {});
+            await page.waitForTimeout(300);
           }
         }
       } catch (e) {}
 
-      // --- 3. SCROLL & CAPTURE COMMENTS ---
+      // --- 3. SCROLL & CAPTURE COMMENTS (Instagram/TikTok) ---
       console.log('[Scraper] Scrolling for comments...');
-      
       try {
-        const viewCommentsBtn = page.getByText(/View all.*comments|Voir les.*commentaires/i);
-        if (await viewCommentsBtn.isVisible()) {
-            await viewCommentsBtn.click({ timeout: 2000 });
-            await page.waitForTimeout(1000);
+        const viewCommentsBtn = page.getByText(/View all.*comments|Voir les.*commentaires|comments?/i);
+        if (await viewCommentsBtn.first().isVisible().catch(() => false)) {
+          await viewCommentsBtn.first().click({ timeout: 2000 }).catch(() => {});
+          await page.waitForTimeout(1000);
         }
       } catch (e) {}
 
@@ -119,27 +159,35 @@ export class ScraperService {
 
       const visibleText = await page.evaluate(() => document.body.innerText);
 
-      // Extract specific caption from DOM with relaxed typing for HTMLElement
-      const specificCaption = await page.evaluate(() => {
-         const h1 = document.querySelector('h1');
-         
-         const candidates = Array.from(document.querySelectorAll('span, div, li, h1'))
-            .filter(el => {
-                const t = (el as HTMLElement).innerText || '';
-                return t.length > 50 && (t.includes('Ingrédients') || t.includes('Recette') || t.includes('Steps'));
-            })
-            .sort((a, b) => ((b as HTMLElement).innerText?.length || 0) - ((a as HTMLElement).innerText?.length || 0));
-
-         if (candidates.length > 0) return (candidates[0] as HTMLElement).innerText;
-         if (h1 && (h1 as HTMLElement).innerText.length > 20) return (h1 as HTMLElement).innerText;
-         return '';
+      // Extract full description: recipe-like blocks + longest substantial text (Instagram & TikTok)
+      const fullDescription = await page.evaluate(() => {
+        const RECIPE_KEYWORDS = /ingr[eé]dients?|recette|recipe|steps?|étapes?|pr[eé]paration|cuisson|min|sec|temps|servings?|personnes?/i;
+        const allEls = Array.from(document.querySelectorAll('span, div, p, h1, h2, li, section'));
+        const texts = allEls
+          .map((el) => (el as HTMLElement).innerText?.trim() || '')
+          .filter((t) => t.length >= 30 && t.length <= 15000);
+        const unique = [...new Set(texts)];
+        const recipeLike = unique.filter((t) => RECIPE_KEYWORDS.test(t)).sort((a, b) => b.length - a.length);
+        const longest = unique.sort((a, b) => b.length - a.length);
+        const chosen = recipeLike[0] || longest[0] || '';
+        const h1 = document.querySelector('h1') as HTMLElement | null;
+        const h1Text = h1?.innerText?.trim() || '';
+        const parts = [chosen, h1Text].filter(Boolean);
+        return [...new Set(parts)].join('\n\n');
       });
 
       const text = `
-        PRIORITY_CAPTION_DOM: ${specificCaption}
-        META_DESCRIPTION: ${metaDescription}
-        JSON_LD: ${jsonLd}
-        FULL_VISIBLE_BODY: ${visibleText}
+DESCRIPTION_FULL (caption/description complète):
+${fullDescription || visibleText}
+
+META_DESCRIPTION:
+${metaDescription}
+
+JSON_LD:
+${jsonLd}
+
+FULL_VISIBLE_BODY (tout le texte de la page):
+${visibleText}
       `;
 
       // Take screenshot
@@ -152,12 +200,12 @@ export class ScraperService {
       console.log(`[Scraper] Successfully scraped ${url}`);
       console.log(`[Scraper] Extracted data:`, {
         textLength: text.length,
-        captionLength: specificCaption.length,
+        descriptionLength: fullDescription.length,
         metaDescriptionLength: metaDescription.length,
         jsonLdLength: jsonLd.length,
         visibleTextLength: visibleText.length,
         commentsCount: comments.length,
-        title: title
+        title: title,
       });
       
       return {
