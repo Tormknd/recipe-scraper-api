@@ -72,6 +72,9 @@ dist/test-models*.js
 
 # Cookies (sensible - à mettre manuellement sur le serveur)
 cookies.txt
+cookies-tiktok.txt
+cookies-tiktok.clean.txt
+cookies.clean.txt
 
 
 

@@ -1,5 +1,11 @@
 import fs from 'fs';
 import path from 'path';
+import { detectPlatform, isTikTokUrl } from './platform';
+import {
+  filterCookiesForHostname,
+  filterCookiesForPlatform,
+  ParsedCookie,
+} from './httpCookies';
 
 /** Format Netscape : domain flag path secure expiration name value (tab-separated) */
 export function parseNetscapeCookies(filePath: string): Array<{ name: string; value: string; domain: string; path: string; expires?: number; secure?: boolean }> {
@@ -26,14 +32,7 @@ export function parseNetscapeCookies(filePath: string): Array<{ name: string; va
   return cookies;
 }
 
-export function isTikTokUrl(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname.toLowerCase();
-    return hostname.includes('tiktok.com') || hostname.includes('vm.tiktok.com');
-  } catch {
-    return false;
-  }
-}
+export { isTikTokUrl, isInstagramUrl, detectPlatform } from './platform';
 
 const COOKIES_PATH = process.env.COOKIES_PATH || path.resolve(process.cwd(), 'cookies.txt');
 const COOKIES_TIKTOK_PATH = process.env.COOKIES_TIKTOK_PATH || path.resolve(process.cwd(), 'cookies-tiktok.txt');
@@ -45,8 +44,54 @@ export function getCookiesPathForUrl(url: string): string {
   return COOKIES_PATH;
 }
 
-/** Retourne les cookies Netscape parsés pour l’URL (Instagram ou TikTok). */
-export function loadCookiesForUrl(url: string): Array<{ name: string; value: string; domain: string; path: string; expires?: number; secure?: boolean }> {
+export function serializeNetscapeCookies(cookies: ParsedCookie[]): string {
+  const header =
+    '# Netscape HTTP Cookie File\n# Filtré par recipe-scraper-api\n';
+  const lines = cookies.map((cookie) => {
+    const domain = cookie.domain;
+    const includeSubdomains = domain.startsWith('.') ? 'TRUE' : 'FALSE';
+    const expiration =
+      cookie.expires && cookie.expires > 0
+        ? cookie.expires
+        : Math.floor(Date.now() / 1000) + 86400 * 365;
+    const secure = cookie.secure ? 'TRUE' : 'FALSE';
+    return `${domain}\t${includeSubdomains}\t${cookie.path}\t${secure}\t${expiration}\t${cookie.name}\t${cookie.value}`;
+  });
+  return `${header}${lines.join('\n')}\n`;
+}
+
+/**
+ * Écrit un fichier Netscape temporaire avec uniquement les cookies utiles pour l'URL.
+ * Évite d'envoyer 6000 lignes à yt-dlp.
+ */
+export function writeFilteredCookiesForUrl(
+  sourcePath: string,
+  destPath: string,
+  url: string
+): number {
+  const parsed = parseNetscapeCookies(sourcePath);
+  const platform = detectPlatform(url);
+  const hostname = new URL(url).hostname;
+
+  const filtered =
+    platform === 'unknown'
+      ? filterCookiesForHostname(parsed, hostname)
+      : filterCookiesForPlatform(parsed, platform);
+
+  fs.writeFileSync(destPath, serializeNetscapeCookies(filtered), 'utf-8');
+  console.log(
+    `[Cookies] Filtre ${sourcePath}: ${parsed.length} → ${filtered.length} entrées pour ${platform} (${hostname})`
+  );
+  return filtered.length;
+}
+
+/** Retourne les cookies parsés et filtrés pour la plateforme de l'URL. */
+export function loadCookiesForUrl(url: string): ParsedCookie[] {
   const cookiesPath = getCookiesPathForUrl(url);
-  return parseNetscapeCookies(cookiesPath);
+  const parsed = parseNetscapeCookies(cookiesPath);
+  const platform = detectPlatform(url);
+  if (platform === 'unknown') {
+    return filterCookiesForHostname(parsed, new URL(url).hostname);
+  }
+  return filterCookiesForPlatform(parsed, platform);
 }

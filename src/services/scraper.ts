@@ -1,12 +1,16 @@
 import { chromium } from 'playwright-extra';
 import stealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { extractPostMetadata, metadataToScrapedText } from '../extractors';
 import { ScrapedData } from '../types';
 import { loadCookiesForUrl, isTikTokUrl } from '../utils/cookies';
 
 // Apply stealth plugin to Playwright (via playwright-extra)
 chromium.use(stealthPlugin());
 
-const USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+const MOBILE_USER_AGENT =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+const TIKTOK_DESKTOP_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 /** Convertit les cookies parsés en format Playwright (domain requis pour addCookies). */
 function toPlaywrightCookies(
@@ -34,7 +38,32 @@ function toPlaywrightCookies(
 export class ScraperService {
   async scrapeUrl(url: string): Promise<ScrapedData> {
     console.log(`[Scraper] Starting scrape for: ${url}`);
-    const platform = isTikTokUrl(url) ? 'TikTok' : 'Instagram';
+    const isTikTok = isTikTokUrl(url);
+    const platform = isTikTok ? 'TikTok' : 'Instagram';
+
+    let apiPreface = '';
+    let apiComments: string[] = [];
+    let structuredComments: ScrapedData['structuredComments'] = [];
+    let postDescription = '';
+    try {
+      const metadata = await extractPostMetadata(url);
+      const hasApiData =
+        metadata &&
+        (metadata.description.length > 0 || metadata.comments.length > 0);
+      if (hasApiData && metadata) {
+        apiPreface = metadataToScrapedText(metadata);
+        postDescription = metadata.description;
+        structuredComments = metadata.comments;
+        apiComments = metadata.comments.map(
+          (c) => `${c.author ? `@${c.author}: ` : ''}${c.text}`
+        );
+        console.log(
+          `[Scraper] API metadata (${metadata.source}): desc=${metadata.description.length} chars, comments=${metadata.comments.length}`
+        );
+      }
+    } catch (apiError) {
+      console.warn('[Scraper] API metadata extraction failed, Playwright only:', apiError);
+    }
 
     const browser = await chromium.launch({
       headless: true,
@@ -43,11 +72,11 @@ export class ScraperService {
 
     try {
       const context = await browser.newContext({
-        userAgent: USER_AGENT,
-        viewport: { width: 390, height: 844 },
-        deviceScaleFactor: 3,
-        isMobile: true,
-        hasTouch: true,
+        userAgent: isTikTok ? TIKTOK_DESKTOP_UA : MOBILE_USER_AGENT,
+        viewport: isTikTok ? { width: 1280, height: 720 } : { width: 390, height: 844 },
+        deviceScaleFactor: isTikTok ? 1 : 3,
+        isMobile: !isTikTok,
+        hasTouch: !isTikTok,
         locale: 'fr-FR',
         timezoneId: 'Europe/Paris',
       });
@@ -176,8 +205,10 @@ export class ScraperService {
         return [...new Set(parts)].join('\n\n');
       });
 
+      const mergedComments = [...new Set([...apiComments, ...comments])].slice(0, 20);
+
       const text = `
-DESCRIPTION_FULL (caption/description complète):
+${apiPreface ? `${apiPreface}\n\n---\n\n` : ''}DESCRIPTION_FULL (caption/description complète):
 ${fullDescription || visibleText}
 
 META_DESCRIPTION:
@@ -210,10 +241,12 @@ ${visibleText}
       
       return {
         text,
-        comments,
+        comments: mergedComments,
+        structuredComments,
+        postDescription: postDescription || undefined,
         screenshotBase64,
         url,
-        title
+        title,
       };
 
     } catch (error) {

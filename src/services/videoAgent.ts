@@ -4,14 +4,20 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { promisify } from 'util';
+import { extractTikTokPost, resolveTikTokUrl } from '../extractors/tiktok';
 import { Recipe, UsageMetrics } from '../types';
+import { getCookiesPathForUrl, writeFilteredCookiesForUrl } from '../utils/cookies';
+import { buildVideoExtractionPrompt } from '../utils/geminiPrompt';
+import { ScrapedComment } from '../types';
+import { extractPostMetadata } from '../extractors';
+import { getCookieHeaderForUrl } from '../utils/httpCookies';
+import { isTikTokUrl } from '../utils/platform';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const execPromise = promisify(exec);
 
-// Configuration
 const API_KEY = process.env.GEMINI_API_KEY;
 if (!API_KEY) {
   throw new Error('GEMINI_API_KEY is required for video processing');
@@ -20,26 +26,59 @@ if (!API_KEY) {
 const genAI = new GoogleGenerativeAI(API_KEY);
 const MODEL_NAME = 'gemini-flash-latest';
 
-// Chemins cookies : par défaut un seul fichier pour tous les domaines
-const COOKIES_PATH = process.env.COOKIES_PATH || path.resolve(process.cwd(), 'cookies.txt');
-const COOKIES_TIKTOK_PATH = process.env.COOKIES_TIKTOK_PATH || path.resolve(process.cwd(), 'cookies-tiktok.txt');
-const USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+const USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-function isTikTokUrl(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname.toLowerCase();
-    return hostname.includes('tiktok.com') || hostname.includes('vm.tiktok.com');
-  } catch {
+async function downloadVideoFromCdn(
+  downloadUrl: string,
+  outputPath: string,
+  refererUrl: string,
+  cookiesPath: string
+): Promise<boolean> {
+  const cookieHeader = getCookieHeaderForUrl(refererUrl, cookiesPath);
+  const response = await fetch(downloadUrl, {
+    headers: {
+      'User-Agent': USER_AGENT,
+      Referer: refererUrl,
+      Accept: '*/*',
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+    },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(120_000),
+  });
+
+  if (!response.ok) {
+    console.warn(`[Video] CDN download HTTP ${response.status}`);
     return false;
   }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length === 0) return false;
+  fs.writeFileSync(outputPath, buffer);
+  return true;
 }
 
-/** Choisit le fichier de cookies selon l’URL : TikTok a son propre domaine, les cookies Instagram ne suffisent pas. */
-function getCookiesPathForUrl(url: string): string {
-  if (isTikTokUrl(url) && fs.existsSync(COOKIES_TIKTOK_PATH)) {
-    return COOKIES_TIKTOK_PATH;
+async function tryTikTokDirectDownload(url: string, outputPath: string): Promise<boolean> {
+  const cookiesPath = getCookiesPathForUrl(url);
+  if (!fs.existsSync(cookiesPath)) return false;
+
+  try {
+    const canonicalUrl = await resolveTikTokUrl(url);
+    const metadata = await extractTikTokPost(url);
+    const downloadUrl = metadata?.videoDownloadUrl;
+    if (!downloadUrl) return false;
+
+    console.log('[Video] TikTok CDN direct download (embedded JSON URL)...');
+    const ok = await downloadVideoFromCdn(downloadUrl, outputPath, canonicalUrl, cookiesPath);
+    if (ok && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+      const sizeMB = (fs.statSync(outputPath).size / (1024 * 1024)).toFixed(2);
+      console.log(`✅ Video downloaded via TikTok CDN: ${sizeMB}MB`);
+      return true;
+    }
+  } catch (error) {
+    console.warn('[Video] TikTok direct download failed:', error);
   }
-  return COOKIES_PATH;
+  return false;
 }
 
 async function downloadVideo(url: string, outputFilename: string): Promise<string> {
@@ -56,22 +95,43 @@ async function downloadVideo(url: string, outputFilename: string): Promise<strin
   if (fs.existsSync(cookiesPath)) {
     tempCookiesPath = path.join(tmpDir, `cookies_${Date.now()}.txt`);
     try {
-      fs.copyFileSync(cookiesPath, tempCookiesPath);
+      const count = writeFilteredCookiesForUrl(cookiesPath, tempCookiesPath, url);
+      if (count === 0) {
+        console.warn(`⚠️ Aucun cookie ${platform} valide après filtrage — vérifiez cookies-tiktok.txt`);
+      }
       cookiesArg = `--cookies "${tempCookiesPath}"`;
-      console.log(`🍪 Using cookies for ${platform} (copied to temp file for write access)`);
+      console.log(`🍪 Using ${count} filtered cookies for ${platform} (yt-dlp)`);
     } catch (copyError) {
-      console.warn(`⚠️ Failed to copy cookies to temp file: ${copyError}`);
+      console.warn(`⚠️ Failed to write filtered cookies: ${copyError}`);
       cookiesArg = `--cookies "${cookiesPath}"`;
-      console.log(`🍪 Using cookies from: ${cookiesPath} (read-only, may fail at end)`);
+      console.log(`🍪 Fallback cookies path: ${cookiesPath}`);
     }
   } else {
     console.warn(`⚠️ No cookies file at ${cookiesPath} - ${platform} may block requests from datacenter IP. For TikTok, export cookies from tiktok.com (see README).`);
   }
-  
+
+  if (isTikTokUrl(url)) {
+    const directOk = await tryTikTokDirectDownload(url, outputPath);
+    if (directOk) {
+      if (tempCookiesPath && fs.existsSync(tempCookiesPath)) {
+        try {
+          fs.unlinkSync(tempCookiesPath);
+        } catch {
+          /* ignore */
+        }
+      }
+      return outputPath;
+    }
+  }
+
+  const tiktokExtraArgs = isTikTokUrl(url)
+    ? '--extractor-args "tiktok:api_hostname=api16-normal-c-useast1a.tiktokv.com" '
+    : '';
+
   const strategies = [
     {
       name: '720p optimized',
-      command: `yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]" --user-agent "${USER_AGENT}" ${cookiesArg} --force-overwrites --no-warnings -o "${outputPath}" "${url}"`
+      command: `yt-dlp ${tiktokExtraArgs}-f "bestvideo[height<=720]+bestaudio/best[height<=720]" --user-agent "${USER_AGENT}" ${cookiesArg} --force-overwrites --no-warnings -o "${outputPath}" "${url}"`
     },
     {
       name: '720p MP4 fallback',
@@ -170,9 +230,15 @@ async function downloadVideo(url: string, outputFilename: string): Promise<strin
   throw new Error(`Impossible de télécharger la vidéo${cookiesUsed ? '' : ' (pas de cookies)'}.${hint} Vérifiez les logs ci-dessus.`);
 }
 
+export interface VideoExtractionContext {
+  postDescription?: string;
+  structuredComments?: ScrapedComment[];
+}
+
 export async function processVideoRecipe(
-  url: string, 
-  onProgress?: (stage: string, message: string, percentage: number) => void
+  url: string,
+  onProgress?: (stage: string, message: string, percentage: number) => void,
+  context?: VideoExtractionContext
 ): Promise<{ recipe: Recipe; usage?: UsageMetrics } | null> {
   const timestamp = Date.now();
   const tempFilename = `recipe_${timestamp}.mp4`;
@@ -196,29 +262,32 @@ export async function processVideoRecipe(
       console.warn(`⚠️ Video file is large (${fileSizeMB.toFixed(2)}MB). May fail with inlineData.`);
     }
     
-    const model = genAI.getGenerativeModel({ 
+    let postDescription = context?.postDescription;
+    let structuredComments = context?.structuredComments ?? [];
+
+    if (!postDescription || structuredComments.length === 0) {
+      const metadata = await extractPostMetadata(url);
+      if (metadata) {
+        postDescription = postDescription || metadata.description;
+        if (structuredComments.length === 0) {
+          structuredComments = metadata.comments;
+        }
+      }
+    }
+
+    const model = genAI.getGenerativeModel({
       model: MODEL_NAME,
       generationConfig: {
         responseMimeType: 'application/json',
-      }
+        temperature: 0.15,
+      },
     });
-    
-    const prompt = `
-      Tu es un Chef Expert. Analyse cette vidéo (visuel + audio).
-      Ignore les intros inutiles. Concentre-toi sur la recette.
-      
-      EXTRAIS EN JSON STRICT :
-      {
-        "title": "Titre précis",
-        "ingredients": ["qté + nom", "qté + nom"],
-        "steps": ["étape 1", "étape 2"],
-        "prep_time": "XX min",
-        "cook_time": "XX min",
-        "servings": "X personnes",
-        "tips": ["astuce du chef"]
-      }
-      Retourne uniquement le JSON sans markdown.
-    `;
+
+    const prompt = buildVideoExtractionPrompt({
+      url,
+      postDescription,
+      comments: structuredComments,
+    });
 
     if (onProgress) {
       onProgress('ai_extraction', 'Extraction des ingrédients avec Gemini...', 80);

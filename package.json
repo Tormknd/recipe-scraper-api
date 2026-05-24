@@ -8,6 +8,9 @@
     "dev": "ts-node src/index.ts",
     "build": "tsc",
     "lint": "eslint src/**/*.ts",
+    "cookies:clean:tiktok": "ts-node scripts/clean-cookies.ts tiktok",
+    "cookies:clean:instagram": "ts-node scripts/clean-cookies.ts instagram",
+    "cookies:clean": "npm run cookies:clean:tiktok && npm run cookies:clean:instagram",
     "postinstall": "npx playwright install chromium"
   },
   "keywords": [

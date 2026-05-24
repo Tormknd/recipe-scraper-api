@@ -167,7 +167,10 @@ app.post('/process', async (req: Request, res: Response) => {
           try {
             updateProgress('video_download', 'Téléchargement de la vidéo...', 50);
             logger.info({ url }, 'Step 3: Starting video download and analysis...');
-            const videoResult = await processVideoRecipe(url, updateProgress);
+            const videoResult = await processVideoRecipe(url, updateProgress, {
+              postDescription: scrapedData.postDescription,
+              structuredComments: scrapedData.structuredComments,
+            });
             
             if (videoResult && videoResult.recipe) {
               const videoSteps = videoResult.recipe.steps?.length || 0;

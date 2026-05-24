@@ -11,12 +11,23 @@ export interface Recipe {
   tips?: string[]; // Nouveauté : Conseils issus des commentaires ou de l'analyse
 }
 
+export interface ScrapedComment {
+  text: string;
+  author?: string;
+  likes?: number;
+}
+
 export interface ScrapedData {
   text: string;
   screenshotBase64: string;
   url: string;
   title?: string;
-  comments?: string[]; // Nouveauté : Commentaires utilisateurs
+  /** Lignes prêtes pour affichage / legacy */
+  comments?: string[];
+  /** Commentaires structurés (API TikTok/IG) — prioritaires pour Gemini */
+  structuredComments?: ScrapedComment[];
+  /** Description caption extraite par l'extracteur HTTP */
+  postDescription?: string;
 }
 
 export interface ProcessingRequest {
