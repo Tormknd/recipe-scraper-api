@@ -49,7 +49,9 @@ export class ScraperService {
       const metadata = await extractPostMetadata(url);
       const hasApiData =
         metadata &&
-        (metadata.description.length > 0 || metadata.comments.length > 0);
+        (metadata.description.length > 0 ||
+          metadata.comments.length > 0 ||
+          Boolean(metadata.videoDownloadUrl));
       if (hasApiData && metadata) {
         apiPreface = metadataToScrapedText(metadata);
         postDescription = metadata.description;

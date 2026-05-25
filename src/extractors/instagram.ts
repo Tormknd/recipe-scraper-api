@@ -8,6 +8,79 @@ const INSTAGRAM_UA =
 
 const MEDIA_DOC_ID = '10015901848480474';
 
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function unescapeInstagramJsonString(raw: string): string {
+  try {
+    return JSON.parse(`"${raw}"`) as string;
+  } catch {
+    return raw.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
+}
+
+/** Extrait la légende depuis le HTML brut (og:description, JSON embarqué IG). */
+export function extractCaptionFromInstagramHtml(html: string): string {
+  const candidates: string[] = [];
+
+  const ogPatterns = [
+    /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["']/i,
+    /<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:description["']/i,
+    /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i,
+  ];
+  for (const re of ogPatterns) {
+    const m = html.match(re);
+    if (m?.[1] && m[1].length > 15) {
+      candidates.push(decodeHtmlEntities(m[1].trim()));
+    }
+  }
+
+  const accessibility = html.match(/"accessibility_caption"\s*:\s*"((?:\\.|[^"\\])*)"/);
+  if (accessibility?.[1]) {
+    candidates.push(unescapeInstagramJsonString(accessibility[1]).trim());
+  }
+
+  const captionNodes = html.matchAll(
+    /"edge_media_to_caption"\s*:\s*\{\s*"edges"\s*:\s*\[\s*\{\s*"node"\s*:\s*\{\s*"text"\s*:\s*"((?:\\.|[^"\\])*)"/g
+  );
+  for (const m of captionNodes) {
+    if (m[1]) candidates.push(unescapeInstagramJsonString(m[1]).trim());
+  }
+
+  const genericTexts = html.matchAll(/"text"\s*:\s*"((?:\\.|[^"\\])*)"/g);
+  for (const m of genericTexts) {
+    const t = unescapeInstagramJsonString(m[1]).trim();
+    if (t.length >= 40 && /[a-zA-Zàâäéèêëïîôùûüç]{3}/i.test(t)) {
+      candidates.push(t);
+    }
+  }
+
+  const unique = [...new Set(candidates)].filter((t) => t.length >= 15);
+  unique.sort((a, b) => b.length - a.length);
+  return unique[0] || '';
+}
+
+function mergeInstagramMetadata(
+  base: PlatformPostMetadata | null,
+  patch: Partial<PlatformPostMetadata> & { source?: PlatformPostMetadata['source'] }
+): PlatformPostMetadata {
+  return {
+    platform: 'instagram',
+    description: (base?.description?.length ? base.description : patch.description) || '',
+    title: base?.title || patch.title,
+    comments: (base?.comments?.length ? base.comments : patch.comments) || [],
+    videoDownloadUrl: base?.videoDownloadUrl || patch.videoDownloadUrl,
+    videoId: base?.videoId || patch.videoId,
+    source: base?.source || patch.source || 'embedded_json',
+  };
+}
+
 function getInstagramCookieHeader(url: string): { cookieHeader: string; csrfToken: string } {
   const cookiesPath = getCookiesPathForUrl(url);
   const parsed = parseNetscapeCookies(cookiesPath);
@@ -17,12 +90,22 @@ function getInstagramCookieHeader(url: string): { cookieHeader: string; csrfToke
   return { cookieHeader: buildCookieHeader(filtered), csrfToken: csrf };
 }
 
+function normalizeReelUrl(url: string, shortcode: string): string {
+  try {
+    const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+    return `https://www.instagram.com/reel/${shortcode}/`;
+  } catch {
+    return `https://www.instagram.com/reel/${shortcode}/`;
+  }
+}
+
 async function fetchInstagramGraphQL(
   shortcode: string,
   reelUrl: string
 ): Promise<PlatformPostMetadata | null> {
   const { cookieHeader, csrfToken } = getInstagramCookieHeader(reelUrl);
   if (!cookieHeader.includes('sessionid=')) {
+    console.warn('[Instagram] GraphQL skipped: no sessionid in cookies');
     return null;
   }
 
@@ -53,7 +136,10 @@ async function fetchInstagramGraphQL(
     signal: AbortSignal.timeout(20_000),
   });
 
-  if (!response.ok) return null;
+  if (!response.ok) {
+    console.warn(`[Instagram] GraphQL HTTP ${response.status}`);
+    return null;
+  }
 
   const json = (await response.json()) as {
     data?: {
@@ -75,7 +161,10 @@ async function fetchInstagramGraphQL(
   };
 
   const media = json.data?.xdt_shortcode_media;
-  if (!media) return null;
+  if (!media) {
+    console.warn('[Instagram] GraphQL: xdt_shortcode_media absent (doc_id obsolète ?)');
+    return null;
+  }
 
   const description =
     media.edge_media_to_caption?.edges?.[0]?.node?.text?.trim() ?? '';
@@ -91,6 +180,10 @@ async function fetchInstagramGraphQL(
       likes: node.edge_liked_by?.count,
     }));
 
+  console.log(
+    `[Instagram] GraphQL: desc=${description.length} chars, comments=${comments.length}, video=${Boolean(media.video_url)}`
+  );
+
   return {
     platform: 'instagram',
     description,
@@ -101,7 +194,7 @@ async function fetchInstagramGraphQL(
   };
 }
 
-function parseFromHtml(html: string): PlatformPostMetadata | null {
+function parseFromLdJson(html: string): PlatformPostMetadata | null {
   const ldJsonMatches = html.matchAll(
     /<script type="application\/ld\+json">([\s\S]*?)<\/script>/gi
   );
@@ -133,24 +226,49 @@ export async function extractInstagramPost(url: string): Promise<PlatformPostMet
   const shortcode = extractInstagramShortcode(url);
   if (!shortcode) return null;
 
-  const reelUrl = url.includes('/reel/') ? url : `https://www.instagram.com/reel/${shortcode}/`;
+  const reelUrl = normalizeReelUrl(url, shortcode);
 
   try {
-    const fromGraphQL = await fetchInstagramGraphQL(shortcode, reelUrl);
-    if (fromGraphQL?.description) return fromGraphQL;
+    let merged: PlatformPostMetadata | null = await fetchInstagramGraphQL(shortcode, reelUrl);
 
     const { cookieHeader } = getInstagramCookieHeader(reelUrl);
     const pageResponse = await fetch(reelUrl, {
       headers: {
         'User-Agent': INSTAGRAM_UA,
-        Accept: 'text/html',
+        Accept: 'text/html,application/xhtml+xml',
+        'Accept-Language': 'fr-FR,fr;q=0.9',
         ...(cookieHeader ? { Cookie: cookieHeader } : {}),
       },
       signal: AbortSignal.timeout(25_000),
     });
 
-    if (!pageResponse.ok) return null;
-    return parseFromHtml(await pageResponse.text());
+    if (pageResponse.ok) {
+      const html = await pageResponse.text();
+      const fromLd = parseFromLdJson(html);
+      const fromRaw = extractCaptionFromInstagramHtml(html);
+
+      if (fromLd || fromRaw) {
+        merged = mergeInstagramMetadata(merged, {
+          description: fromLd?.description || fromRaw,
+          title: fromLd?.title,
+          source: fromLd ? 'embedded_json' : 'embedded_json',
+        });
+      }
+    } else {
+      console.warn(`[Instagram] Page HTML HTTP ${pageResponse.status}`);
+    }
+
+    if (!merged) return null;
+
+    if (!merged.description.length) {
+      console.warn(
+        `[Instagram] Aucune légende extraite pour ${shortcode} — web_scraping sera vide (cookies / GraphQL)`
+      );
+    } else {
+      console.log(`[Instagram] Légende OK: ${merged.description.length} chars (${merged.source})`);
+    }
+
+    return merged;
   } catch (error) {
     console.warn('[Instagram] Metadata extraction failed:', error);
     return null;

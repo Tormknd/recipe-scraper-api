@@ -50,6 +50,9 @@ export class AIService {
 
     console.log('[AI] Input Text Preview:', data.text.substring(0, 200));
     console.log('[AI] Comments for Gemini:', comments.length);
+    console.log(
+      `[AI] postDescription: ${data.postDescription?.length ?? 0} chars (0 = web_scraping probablement vide)`
+    );
 
     const imagePart: Part = {
       inlineData: {

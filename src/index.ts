@@ -155,11 +155,19 @@ app.post('/process', async (req: Request, res: Response) => {
           stepsCount: extractedRecipe.steps?.length || 0
         }, 'Completeness check');
         
-        // Si incomplète (pas d'étapes valides), basculer sur la vidéo
-        if (isIncomplete || !hasSteps || !isValidSteps) {
+        const isPlaceholderTitle = /^recette\s+non\s+trouvée$/i.test(
+          (extractedRecipe.title || '').trim()
+        );
+
+        // Si incomplète, placeholder, ou pas d'étapes valides → vidéo
+        if (isIncomplete || isPlaceholderTitle || !hasSteps || !isValidSteps) {
           logger.warn({ 
             url, 
-            reason: isIncomplete ? 'AI marked as incomplete' : 'No valid steps found',
+            reason: isIncomplete
+              ? 'AI marked as incomplete'
+              : isPlaceholderTitle
+                ? 'Placeholder title (web had no caption?)'
+                : 'No valid steps found',
             stepsCount: extractedRecipe.steps?.length || 0,
             ingredientsCount: extractedRecipe.ingredients?.length || 0
           }, 'Recipe incomplete - Switching to video analysis');
